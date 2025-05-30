@@ -1,0 +1,212 @@
+.friends-wrapper {
+  min-height: 100vh;
+  background: url("/Start.png") center/cover no-repeat;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;         /* ⬅️ modificat din center în start */
+  font-family: "Chakra Petch", sans-serif;
+  position: relative;
+  flex-direction: column;
+  padding-top: 12vh;
+  box-sizing: border-box;
+  overflow: hidden;                   /* ⬅️ scroll-ul e mutat pe panel */
+}
+
+.friends-background {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  z-index: 0;
+}
+
+.friends-panel {
+  position: relative;
+  z-index: 1;
+  background: rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  padding: 1.8rem 2rem;
+  border-radius: 20px;
+  width: 20%;
+  max-width: 360px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+  color: white;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.2rem;
+  margin-top:9.5rem;
+  flex-shrink: 0;
+  
+}
+
+.friends-header {
+  position: absolute;
+  top: 4.15vh; 
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  z-index: 5;
+  pointer-events: none;
+}
+
+.friends-title {
+  font-size: 1.4rem;
+  font-weight: 550;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+  color: white;
+  margin: 0;
+}
+.friends-mafia-logo {
+  width: 16rem;
+  height: auto;
+  margin-bottom: 2.5rem;
+}
+
+.filters {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  margin-bottom: 0.8rem;
+}
+
+.search-input,
+.status-filter {
+  padding: 0.5rem;
+  border-radius: 12px;
+  border: none;
+  font-size: 0.9rem;
+  outline: none;
+  text-align: center;
+  background-color: rgba(255, 255, 255, 0.8);
+  color: #333;
+  box-shadow: inset 0 1px 3px rgba(0,0,0,0.1);
+}
+
+.friends-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  width: 100%;
+  overflow-y: auto;
+  max-height: 200px;
+}
+
+.friend-item {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  margin: 0.5rem 0;
+  font-size: 0.95rem;
+  padding: 0.4rem 0.6rem;
+  border-radius: 8px;
+  background-color: rgba(255, 255, 255, 0.06);
+  backdrop-filter: blur(10px);
+}
+
+.status-indicator {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  margin-right: 0.75rem;
+  box-shadow: 0 0 5px rgba(0, 0, 0, 0.2);
+}
+
+.status-indicator.online {
+  background-color: #6ad36b;
+}
+
+.status-indicator.offline {
+  background-color: #d36b6b;
+}
+
+.friends-back-button {
+  padding: 0.6rem 1.4rem;
+  background-color: rgba(255, 255, 255, 0.1);
+  border: 1px solid white;
+  border-radius: 12px;
+  color: white;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.25s ease;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  margin-top: 1.4rem;
+}
+
+.friends-back-button:hover {
+  background-color: rgba(255, 255, 255, 0.25);
+  transform: scale(1.05);
+}
+
+@media (max-width: 768px) {
+  .friends-panel {
+    width: 85%;
+    padding: 1.5rem 1.2rem;
+    max-width: none;
+    margin-top: 8rem;
+  }
+
+  .friends-title {
+    font-size: 1.2rem;
+    text-align: center;
+  }
+
+  .filters {
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .search-input,
+  .status-filter {
+    font-size: 0.95rem;
+    padding: 0.5rem 0.8rem;
+  }
+
+  .friends-mafia-logo {
+    width: 13rem;
+    margin-bottom: 2rem;
+  }
+
+  .friend-item {
+    font-size: 0.9rem;
+    padding: 0.5rem 0.6rem;
+  }
+
+  .friends-back-button {
+    font-size: 0.9rem;
+    padding: 0.5rem 1.2rem;
+    margin-top: 1rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .friends-title {
+    font-size: 1rem;
+  }
+
+  .friends-panel {
+    padding: 1.2rem 1rem;
+  }
+
+  .friends-mafia-logo {
+    width: 11rem;
+  }
+
+  .search-input,
+  .status-filter {
+    font-size: 0.85rem;
+  }
+
+  .friend-item {
+    font-size: 0.85rem;
+  }
+}

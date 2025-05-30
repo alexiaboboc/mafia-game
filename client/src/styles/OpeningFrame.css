@@ -1,0 +1,48 @@
+.opening-container {
+    position: relative;
+    width: 100vw;
+    height: 100vh;
+    overflow: hidden;
+  }
+  
+  .opening-background {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    z-index: 0;
+  }
+  
+  .opening-logo-wrapper {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    transition: top 0.8s ease;
+    z-index: 10;
+  }
+  
+  .opening-logo-wrapper.logo-up {
+    top: 12%; /* sau cât vrei tu să „urce” logo-ul */
+  }
+  
+  .opening-logo {
+    width: 16rem !important;
+    height: auto;
+    z-index: 10;
+  }
+  
+  @media (min-width: 768px) {
+    .opening-logo {
+      width: 20rem;
+    }
+  }
+  
+  @media (min-width: 1024px) {
+    .opening-logo {
+      width: 24rem;
+    }
+  }
+  

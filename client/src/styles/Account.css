@@ -1,0 +1,206 @@
+.account-wrapper {
+  min-height: 100vh;
+  background: url("/Start.png") center/cover no-repeat;
+  font-family: "Chakra Petch", sans-serif;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  position: relative;
+  flex-direction: column;
+  padding-top: 12vh;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.account-background {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  z-index: 0;
+}
+
+.account-header {
+  position: absolute;
+  top: 4.15vh;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  z-index: 5;
+  pointer-events: none;
+}
+
+.account-logo {
+  width: 16rem;
+  height: auto;
+  margin-bottom: 2.5rem;
+}
+
+.account-title {
+  font-size: 1.4rem;
+  font-weight: 550;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+  color: white;
+  margin: 0;
+}
+
+.account-panel {
+  position: relative;
+  z-index: 1;
+  background: rgba(255, 255, 255, 0.15);
+  backdrop-filter: blur(25px);
+  -webkit-backdrop-filter: blur(25px);
+  padding: 2rem 3rem;
+  border-radius: 20px;
+  color: white;
+  text-align: center;
+  max-width: 400px;
+  width: 10%;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-top: 9.5rem;
+  flex-shrink: 0;
+}
+
+.account-panel p {
+  margin: 0.2rem 0;
+  font-size: 1.2rem;
+}
+
+.account-buttons {
+  margin-top: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+}
+
+.account-btn {
+  position: relative;
+  padding: 0.5rem 1.2rem; /* mai mic */
+  background-color: rgba(133, 210, 208, 0.65);
+  backdrop-filter: blur(25px);
+  -webkit-backdrop-filter: blur(25px);
+  border: 2px solid rgba(133, 210, 208, 0.8);
+  border-radius: 12px;
+  font-size: 0.9rem; /* mai mic */
+  font-weight: 600;
+  cursor: pointer;
+  width: 180px; /* redus față de 100% */
+  text-transform: uppercase;
+  transition: transform 0.2s ease, background-color 0.3s ease, border 0.3s ease;
+  color: white;
+  box-shadow: 0 3px 4px rgba(0, 0, 0, 0.25);
+  overflow: hidden;
+  align-self: center;
+  text-align: center;
+}
+
+.account-btn:hover {
+  background-color: #6cbebc;
+  border-color: #6cbebc;
+  transform: scale(1.05);
+}
+
+.account-btn::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  box-shadow: inset 0 4px 4px rgba(255, 255, 255, 0.36);
+  pointer-events: none;
+  border-radius: 10px;
+}
+
+.account-btn::before {
+  content: attr(data-text);
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  color: transparent;
+  text-shadow: 0 -4px 4px rgba(255, 255, 255, 1);
+  z-index: -1;
+  pointer-events: none;
+}
+
+.account-back-button {
+  padding: 0.6rem 1.4rem;
+  background-color: rgba(255, 255, 255, 0.1);
+  border: 1px solid white;
+  border-radius: 12px;
+  color: white;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.25s ease;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  margin-top: 1.4rem;
+}
+
+.account-back-button:hover {
+  background-color: rgba(255, 255, 255, 0.25);
+  transform: scale(1.05);
+}
+
+@media (max-width: 768px) {
+  .account-logo {
+    width: 10rem;
+    margin-bottom: 1.5rem;
+  }
+
+  .account-title {
+    font-size: 1.1rem;
+    text-align: center;
+  }
+
+  .account-panel {
+    width: 85%;
+    padding: 1.5rem 1.8rem;
+    margin-top: 6rem;
+  }
+
+  .account-panel p {
+    font-size: 1rem;
+  }
+
+  .account-btn {
+    width: 100%;
+    font-size: 0.85rem;
+    padding: 0.5rem;
+  }
+
+  .account-buttons {
+    width: 100%;
+  }
+
+  .account-back-button {
+    font-size: 0.85rem;
+    padding: 0.5rem 1rem;
+  }
+
+  .account-header {
+    top: 3vh;
+  }
+}
+
+@media (max-width: 480px) {
+  .account-title {
+    font-size: 1rem;
+  }
+
+  .account-panel {
+    margin-top: 5rem;
+    padding: 1rem 1.2rem;
+  }
+
+  .account-logo {
+    width: 8rem;
+  }
+}

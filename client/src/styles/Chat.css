@@ -1,0 +1,180 @@
+@import url('https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;600&display=swap');
+
+.chat-wrapper {
+    height: 100vh;
+    width: 100vw;
+    background: url("/Start.png") center/cover no-repeat;
+    display: flex;  /* 🔁 de la center la flex-start */
+    justify-content: center;
+    font-family: "Chakra Petch", sans-serif;
+    color: white;
+    overflow: hidden;
+    position: relative;        
+    flex-direction: column;
+    align-items: center;
+/* 🔁 setează o distanță mică */
+  }
+  
+  .chat-container {
+    width: 600px;             /* dimensiune fixă */
+    height: 40vh;             /* înălțime fixă */
+    background: rgba(255, 255, 255, 0.08);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+    border-radius: 20px;
+    padding: 2rem;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+    gap: 1rem;
+    position: relative;
+    max-height: 75vh;
+    margin-top: -2vh;
+  }
+
+.chat-header {
+  font-size: 1.5rem;
+  font-weight: 600;
+  text-align: center;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+
+.chat-messages {
+  max-height: 300px;
+  overflow-y: auto;
+  background-color: rgba(255, 255, 255, 0.06);
+  padding: 1rem;
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+}
+
+.chat-message {
+  font-size: 1rem;
+  line-height: 1.4;
+  background-color: rgba(255, 255, 255, 0.1);
+  padding: 0.5rem 1rem;
+  border-radius: 10px;
+}
+
+.chat-user {
+  font-weight: 600;
+  color: #b175ff;
+  margin-right: 0.5rem;
+}
+
+.chat-input-area {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.chat-input-area input {
+  flex: 1;
+  padding: 0.6rem 1rem;
+  border-radius: 12px;
+  border: none;
+  outline: none;
+  font-size: 1rem;
+  font-family: 'Chakra Petch', sans-serif;
+  background-color: rgba(255, 255, 255, 0.9);
+  color: #333;
+}
+
+.chat-input-area button {
+  padding: 0.6rem 1.4rem;
+  background-color: rgba(255, 255, 255, 0.12);
+  border: 2px solid white;
+  border-radius: 12px;
+  color: white;
+  font-weight: 600;
+  font-size: 0.95rem;
+  cursor: pointer;
+  transition: all 0.25s ease;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+.chat-input-area button:hover {
+  background-color: rgba(255, 255, 255, 0.25);
+  transform: scale(1.05);
+}
+.chat-vote-area {
+    display: flex;
+    justify-content: center;
+    margin-top: 1rem;
+  }
+  
+.chat-vote-button {
+  margin-top: 1rem;
+  padding: 0.6rem 1.4rem;
+  background-color: rgba(177, 117, 255, 0.2);
+  border: 2px solid #b175ff;
+  border-radius: 12px;
+  color: white;
+  font-weight: 600;
+  font-size: 0.95rem;
+  cursor: pointer;
+  transition: all 0.25s ease;
+  backdrop-filter: blur(10px);
+  width: 20%;
+  align-self: center;
+}
+
+.chat-vote-button:hover {
+  background-color: rgba(177, 117, 255, 0.35);
+  transform: scale(1.05);
+}
+@media (max-width: 768px) {
+    .chat-container {
+      width: 90%;
+      height: auto;
+      padding: 1.5rem;
+      margin-top: 2vh;
+    }
+  
+    .chat-messages {
+      max-height: 200px;
+      padding: 0.8rem;
+    }
+  
+    .chat-message {
+      font-size: 0.9rem;
+      padding: 0.4rem 0.8rem;
+    }
+  
+    .chat-input-area input {
+      font-size: 0.9rem;
+      padding: 0.5rem 0.8rem;
+    }
+  
+    .chat-input-area button {
+      font-size: 0.85rem;
+      padding: 0.5rem 1rem;
+    }
+  
+    .chat-vote-button {
+      font-size: 0.85rem;
+      padding: 0.5rem 1rem;
+      width: 100%;
+    }
+  }
+  
+  @media (max-width: 480px) {
+    .chat-header {
+      font-size: 1.2rem;
+    }
+  
+    .chat-input-area {
+      flex-direction: column;
+      gap: 0.6rem;
+    }
+  
+    .chat-input-area button {
+      width: 100%;
+    }
+  
+    .chat-vote-button {
+      margin-top: 0.8rem;
+    }
+  }

@@ -1,0 +1,302 @@
+.options-wrapper {
+    height: 100vh;
+    background: url('/Start.png') center/cover no-repeat;
+    font-family: "Chakra Petch", sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    position: relative;
+    color: white;
+  }
+  
+  .options-title {
+    margin-top: 2.5rem;
+    font-size: 1.4rem;
+    font-weight: 550;
+    text-shadow: 0 2px 8px rgba(0, 0, 0, 0.6);
+  }
+  
+  .options-back {
+    padding: 0.3rem 0.8rem;
+    font-size: 0.9rem;
+    background-color: rgba(255, 255, 255, 0.2);
+    border: 1px solid white;
+    color: white;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    backdrop-filter: blur(10px);
+  }
+  
+  .options-back:hover {
+    background-color: rgba(255, 255, 255, 0.4);
+    transform: scale(1.05);
+  }
+  .options-panel {
+    background: rgba(255, 255, 255, 0.183);
+    padding: 1.2rem;
+    border-radius: 20px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.6);
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    width: 280px;
+  }
+  
+  .option-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  
+  .option-row label {
+    flex: 1;
+    font-size: 1.05rem;
+    font-weight: 600;
+  }
+  
+  .option-row input[type="range"] {
+    flex: 2;
+    margin-left: 1rem;
+    background: linear-gradient(to right, #6c9fe8 90%, #6c9fe8 90%, rgba(255, 255, 255, 0.12) 50%, rgba(255, 255, 255, 0.191) 100%);
+      box-shadow:
+        inset 0 4px 4px rgba(255, 255, 255, 0.13),
+        0 4px 4px rgba(0, 0, 0, 0.25);
+      outline: none;
+      border-radius: 10px;  height: 8px;
+  }
+  
+  .theme-icons {
+    display: flex;
+    gap: 0.6rem;
+    font-size: 1.2rem;
+  }
+  
+  .toggle-switch {
+    width: 80px;
+    height: 40px;
+    border-radius: 999px;
+    background-color: #999;
+    position: relative;
+    cursor: pointer;
+    box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.2),
+                0 4px 8px rgba(0, 0, 0, 0.2);
+    transition: background-color 0.3s ease;
+    font-family: 'Chakra Petch', sans-serif;
+    font-weight: bold;
+    padding-left: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+  }
+  
+  .toggle-switch .toggle-label {
+    color: white;
+    z-index: 2;
+    font-size: 1rem;
+    letter-spacing: 1px;
+    position: relative;
+    z-index: 2;
+  }
+  
+  /* Cercul */
+  .toggle-switch::after {
+    content: "";
+    position: absolute;
+    top: 4px;
+    left: 4px;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background-color: white;
+    transition: transform 0.3s ease;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+  }
+  
+  /* ON STATE */
+  .toggle-switch.on {
+    background-color: #4ede8c;
+    justify-content: flex-start;
+    padding-left: 16px;
+    padding-right: 0;
+  }
+  
+  .toggle-switch.on::after {
+    transform: translateX(56px);
+  }
+  
+  .toggle-switch.off {
+    background-color: #999;
+    justify-content: flex-end;
+    padding-right: 16px;
+    padding-left: 0;
+  }
+  
+  .toggle-switch.off::after {
+    transform: translateX(0);
+  }
+  
+  .reset-button {
+    position: relative;
+    padding: 0.8rem 2rem;
+    background-color: rgba(108, 159, 232, 0.5); /* culoarea inițială cu opacitate */
+    backdrop-filter: blur(25px);
+    -webkit-backdrop-filter: blur(25px);
+    border: 3px solid rgba(108, 159, 232, 0.7);
+    border-radius: 15px;
+    font-size: 1rem;
+    font-weight: bold;
+    cursor: pointer;
+    width: 75%;
+    text-transform: uppercase;
+    transition: transform 0.2s ease, background-color 0.3s ease, border 0.3s ease;
+    color: #ffffff;
+    box-shadow: 0 4px 4px rgba(0, 0, 0, 0.25);
+    overflow: hidden;
+    margin-top: 0rem;
+    align-self: center;
+  }
+  
+  .reset-button:hover {
+    background-color: #6c9fe8;
+    border-color: #6c9fe8;
+    transform: scale(1.05);
+  }
+  
+  .reset-button::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    box-shadow: inset 0 4px 4px rgba(255, 255, 255, 0.36);
+    pointer-events: none;
+    border-radius: 10px;
+  }
+  
+  .reset-button::before {
+    content: attr(data-text);
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    color: transparent;
+    text-shadow: 0 -4px 4px rgba(255, 255, 255, 1);
+    z-index: -1;
+    pointer-events: none;
+  }
+  .options-header {
+    width: 100%;
+    display: flex;
+    justify-content: flex-start;
+    padding: 1rem 1.5rem 0 1.5rem;
+    box-sizing: border-box;
+  }
+
+  .options-back-under {
+    margin-top: 1.2rem;
+    padding: 0.5rem 1.4rem;
+    background-color: rgba(255, 255, 255, 0.2);
+    border: 1px solid white;
+    color: white;
+    border-radius: 10px;
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+  }
+  
+  .options-back-under:hover {
+    background-color: rgba(255, 255, 255, 0.4);
+    transform: scale(1.05);
+  }
+  .options-mafia-logo {
+    margin-top:2.27rem;
+    width: 16rem !important;
+    height: auto;
+    z-index: 10;
+  }
+  @media (max-width: 768px) {
+    .options-panel {
+      width: 85%;
+      padding: 1rem 1.5rem;
+    }
+  
+    .options-title {
+      font-size: 1.2rem;
+      text-align: center;
+      margin-top: 2rem;
+    }
+  
+    .option-row {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 0.6rem;
+    }
+  
+    .option-row label {
+      font-size: 1rem;
+    }
+  
+    .option-row input[type="range"] {
+      width: 100%;
+      margin-left: 0;
+    }
+  
+    .toggle-switch {
+      width: 70px;
+      height: 36px;
+    }
+  
+    .toggle-switch::after {
+      width: 28px;
+      height: 28px;
+      top: 4px;
+      left: 4px;
+    }
+  
+    .toggle-switch.on::after {
+      transform: translateX(36px);
+    }
+  
+    .reset-button {
+      width: 100%;
+      font-size: 0.95rem;
+    }
+  
+    .options-mafia-logo {
+      width: 12rem !important;
+      margin-top: 2rem;
+    }
+  }
+  
+  @media (max-width: 480px) {
+    .options-title {
+      font-size: 1rem;
+    }
+  
+    .reset-button {
+      font-size: 0.9rem;
+    }
+  
+    .toggle-switch {
+      width: 60px;
+      height: 30px;
+    }
+  
+    .toggle-switch::after {
+      width: 24px;
+      height: 24px;
+      top: 3px;
+      left: 3px;
+    }
+  
+    .toggle-switch.on::after {
+      transform: translateX(30px);
+    }
+  
+    .options-mafia-logo {
+      width: 10rem !important;
+    }
+  }

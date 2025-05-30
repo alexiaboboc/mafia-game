@@ -1,0 +1,165 @@
+@import url('https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;600&display=swap');
+
+.night-actions-wrapper {
+  min-height: 100vh;
+  background: url("/Start.png") center/cover no-repeat;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  padding-top: 9vh;
+  box-sizing: border-box;
+  font-family: "Chakra Petch", sans-serif;
+  color: white;
+}
+
+.night-actions-container {
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(20px);
+  padding: 2rem 2.5rem;
+  border-radius: 20px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+  max-width: 800px;
+  width: 20%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2rem;
+}
+
+.night-text {
+  font-size: 1.15rem;
+  font-weight: 450;
+  line-height: 1.6;
+  text-align: center;
+  padding: 0 0.5rem;
+  max-width: 650px;
+  color: rgba(255, 255, 255, 0.95);
+}
+
+.player-turn-ui {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.5rem;
+}
+
+.your-turn {
+  font-size: 1.4rem;
+  font-weight: 600;
+  margin-bottom: 0.4rem;
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.3);
+}
+
+.card-grid {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.5rem;
+}
+
+.your-role-img {
+  width: 190px;
+  border-radius: 12px;
+
+}
+
+.target-grid {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 1rem;
+    width: 100%;
+    max-width: 600px;
+  }
+
+.target-box {
+  background-color: rgba(255, 255, 255, 0.15);
+  border: 2px solid white;
+  border-radius: 12px;
+  padding: 0.8rem 1.2rem;
+  color: white;
+  font-size: 0.95rem;
+  font-weight: 500;
+  text-align: center;
+  transition: background-color 0.3s ease;
+  cursor: pointer;
+}
+
+.target-box:hover {
+  background-color: rgba(255, 255, 255, 0.25);
+}
+
+@keyframes fadeInSlideUp {
+  from {
+    opacity: 0;
+    transform: translateY(30px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.fade-in-section {
+  animation: fadeInSlideUp 0.6s ease forwards;
+  opacity: 0;
+}
+
+@media (max-width: 768px) {
+    .night-actions-container {
+      width: 85%;
+      padding: 1.5rem;
+    }
+  
+    .night-text {
+      font-size: 1rem;
+      padding: 0 1rem;
+    }
+  
+    .your-turn {
+      font-size: 1.2rem;
+      text-align: center;
+    }
+  
+    .your-role-img {
+      width: 150px;
+    }
+  
+    .target-grid {
+      flex-direction: column;
+      gap: 0.8rem;
+      align-items: center;
+    }
+  
+    .target-box {
+      font-size: 0.95rem;
+      padding: 0.7rem 1.2rem;
+      width: 80%;
+      max-width: 240px;
+    }
+  }
+  
+  @media (max-width: 480px) {
+    .night-actions-container {
+      width: 92%;
+      padding: 1rem;
+    }
+  
+    .night-text {
+      font-size: 0.95rem;
+    }
+  
+    .your-turn {
+      font-size: 1.1rem;
+    }
+  
+    .your-role-img {
+      width: 130px;
+    }
+  
+    .target-box {
+      font-size: 0.9rem;
+      padding: 0.6rem 1rem;
+    }
+  }

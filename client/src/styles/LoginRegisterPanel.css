@@ -1,0 +1,280 @@
+@import url('https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;600;700&display=swap');
+
+.auth-toggle {
+    position: relative;
+    display: flex;
+    justify-content: space-between;
+    width: 70%;
+    height: 42px;
+    background: rgba(255, 255, 255, 0.298);
+    border-radius: 16px;
+    padding: 0.7px;
+    box-shadow: inset 0px 4px 4px rgba(255, 255, 255, 0.13);
+    margin-bottom: 1.5rem;
+    overflow: hidden;
+    gap: 0; /* important */
+  }
+  .auth-slider {
+    position: absolute;
+    top: 4px;
+    left: 4px;
+    width: calc(50% - 4px);
+    height: calc(100% - 8px);
+    border-radius: 13px;
+    z-index: 0;
+    background-color: #b60056;
+    transition: transform 0.4s ease, background-color 0.3s ease;
+    box-shadow: inset 0px 4px 4px rgba(255, 255, 255, 0.13);
+  }
+  
+  .auth-slider.right {
+    transform: translateX(100%);
+    background-color: #642884;
+  }
+  
+  .auth-btn {
+    position: relative;
+    z-index: 1;
+    flex: 1 1 50%;
+    height: 100%;
+    background: transparent;
+    border: none;
+    font-weight:550;
+    font-size: 0.9rem;
+    color: #333;
+    cursor: pointer;
+    border-radius: 12px;
+    transition: all 0.3s ease;
+
+  }
+  
+  .auth-btn.active {
+    color: white;
+  }
+   
+
+.auth-wrapper {
+    display: flex;
+    justify-content: center;
+    align-items: start; /* schimbat din center în start */
+    min-height: 100vh;
+    padding-top: 21vh; /* ca să simuleze centru și să lase loc de extindere în jos */
+    font-family: 'Chakra Petch', sans-serif;
+    isolation: isolate;
+  }
+  
+  
+.auth-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    font-family: 'Chakra Petch', sans-serif;
+    z-index: 30;
+    max-width: 400px;
+    width: 100%;
+  }
+
+.auth-header {
+  text-align: center;
+  margin-bottom: 0.3rem;
+  color: white;
+  max-width: 360px;
+  z-index: 31;
+}
+
+.auth-message {
+    text-align: center;
+    color: white;
+    font-family: 'Chakra Petch', sans-serif;
+    font-size: 0.82rem;
+    line-height: 1.4;
+    max-width: 360px;
+    margin-bottom: 0.3rem;
+  }  
+
+.auth-panel {
+    background: rgba(255, 255, 255, 0.183);
+    border-radius: 20px;
+    padding: 2rem;
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    width: 100%;
+    max-width: 350px;
+    box-shadow: 0 0 20px rgba(0, 0, 0, 0.25);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    z-index: 30;
+    transition: all 0.4s ease;
+
+    transition: min-height 0.4s ease, padding 0.3s ease;
+    max-height: 480px; /* suficient pentru login */
+  }
+
+.auth-panel.expanded {
+    max-height: 620px; /* extindere pentru register */
+  }
+
+.auth-btn:hover {
+  transform: scale(1.04);
+}
+
+.auth-btn.active.login,
+.auth-btn.login:hover {
+  background: #b60056;
+}
+
+.auth-btn.active.register,
+.auth-btn.register:hover {
+  background: #642884;
+}
+
+.auth-form {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.auth-form input {
+  padding: 0.6rem 1rem;
+  border-radius: 10px;
+  border: none;
+  outline: none;
+  font-size: 0.9rem;
+}
+
+.submit-btn {
+  margin-top: 1rem;
+  padding: 0.7rem 1rem;
+  background: #b60056;
+  border: none;
+  border-radius: 10px;
+  color: white;
+  font-weight: 550;
+  cursor: pointer;
+  transition: background 0.3s ease;
+  box-shadow: inset 0px 4px 4px rgba(255, 255, 255, 0.13),
+  0px 4px 4px rgba(0, 0, 0, 0.25);
+  width: 100%; /* nou: lățime fixă mai mică */
+  height: 40px;
+  align-self: center; 
+  justify-content: center;
+  font-size: 0.9rem;
+}
+
+.submit-btn.register {
+  background: #642884;
+  
+}
+
+.submit-btn:hover {
+  background: #8c0040;
+}
+
+.submit-btn.register:hover {
+    background: #4d1d68;
+}
+
+.auth-form label {
+    color: white;
+    font-size: 0.8rem;
+    margin-top: 0.5rem;
+    margin-bottom: -0.5rem;
+    font-weight: 500;
+  }
+ 
+/* default color pentru ambele */
+.auth-btn.login-btn,
+.auth-btn.register-btn {
+  color: #ffffff;
+}
+
+/* când login e activ, register devine roz */
+.auth-toggle.signin-active .register-btn {
+  color: #b60056;
+}
+
+/* când register e activ, login devine mov */
+.auth-toggle.register-active .login-btn {
+  color: #642884;
+}
+
+  
+
+.fade-in {
+    animation: fadeIn 1s ease-in-out forwards;
+    opacity: 0;
+  }
+  
+@keyframes fadeIn {
+    to {
+      opacity: 1;
+    }
+}
+@media (max-width: 768px) {
+  .auth-wrapper {
+    padding-top: 12vh;
+    align-items: center;
+  }
+
+  .auth-container {
+    width: 90%;
+    max-width: 360px;
+  }
+
+  .auth-panel {
+    padding: 1.5rem;
+    max-width: 100%;
+  }
+
+  .auth-toggle {
+    width: 100%;
+  }
+
+  .auth-message {
+    font-size: 0.78rem;
+    max-width: 90%;
+  }
+
+  .auth-btn {
+    font-size: 0.85rem;
+  }
+
+  .submit-btn {
+    font-size: 0.85rem;
+    padding: 0.6rem 1rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .auth-container {
+    width: 95%;
+  }
+
+  .auth-panel {
+    padding: 1.2rem;
+  }
+
+  .auth-message {
+    font-size: 0.75rem;
+  }
+
+  .auth-btn {
+    font-size: 0.8rem;
+  }
+
+  .submit-btn {
+    font-size: 0.8rem;
+    height: 36px;
+  }
+
+  .auth-toggle {
+    height: 38px;
+  }
+
+  .auth-slider {
+    top: 3px;
+    height: calc(100% - 6px);
+  }
+}
