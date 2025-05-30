@@ -37,8 +37,9 @@ export default function LoginRegisterPanel({ show = false }: Props) {
 
         console.log("Login success:", response.data);
         console.log("Storing:", response.data.user);
-        localStorage.setItem("username", response.data.user.username);
-        localStorage.setItem("email", response.data.user.email);
+        sessionStorage.setItem("username", response.data.user.username);
+        sessionStorage.setItem("email", response.data.user.email);
+        sessionStorage.setItem("id", response.data.user.id);
         navigate("/menu");
       }
     } catch (error: any) {

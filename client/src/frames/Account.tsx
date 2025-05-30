@@ -9,8 +9,8 @@ export default function Account() {
   const [email, setEmail] = useState<string | null>("");
 
   useEffect(() => {
-    const storedUsername = localStorage.getItem("username");
-    const storedEmail = localStorage.getItem("email");
+    const storedUsername = sessionStorage.getItem("username");
+    const storedEmail = sessionStorage.getItem("email");
     console.log("Stored email:", storedEmail);
     setUsername(storedUsername);
     setEmail(storedEmail);
@@ -37,8 +37,8 @@ export default function Account() {
           <button
             className="account-btn"
             onClick={() => {
-              localStorage.removeItem("username");
-              localStorage.removeItem("email");
+              sessionStorage.removeItem("username");
+              sessionStorage.removeItem("email");
               navigate("/"); // sau pagina ta de login
             }}
           >

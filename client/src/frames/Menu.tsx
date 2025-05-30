@@ -2,16 +2,35 @@ import { useNavigate } from "react-router-dom";
 import React, { useEffect, useState } from "react";
 import "../styles/Menu.css";
 
-
 export default function Menu() {
   const [username, setUsername] = useState<string | null>("");
   const navigate = useNavigate();
+
   useEffect(() => {
-    const storedUsername = localStorage.getItem("username");
+    const storedUsername = sessionStorage.getItem("username");
     if (storedUsername) {
       setUsername(storedUsername);
     }
   }, []);
+
+  const handleNewGame = async () => {
+    const user = sessionStorage.getItem("username");
+    const id = sessionStorage.getItem("id");
+
+    const response = await fetch("http://localhost:5001/api/lobby/new", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username: user, id }),
+    });
+
+    const data = await response.json();
+    if (response.ok) {
+      sessionStorage.setItem("lobbyCode", data.code); // 🔐 salvăm codul pentru Lobby.tsx
+      navigate("/lobby");
+    } else {
+      alert(data.error || "Could not create lobby");
+    }
+  };
 
   return (
     <div className="menu-wrapper">
@@ -34,17 +53,22 @@ export default function Menu() {
           <button className="menu-button" onClick={() => navigate("/enter-code")}>
             Join Game
           </button>
-          <button className="menu-button" onClick={() => navigate("/lobby")}>
+          <button className="menu-button" onClick={handleNewGame}>
             New Game
           </button>
           <button className="menu-button" onClick={() => navigate("/options")}>
             Options
           </button>
-          <button className="menu-button" onClick={() => navigate("/guide")}>Guide</button>
-          <button className="menu-button" onClick={() => {
-            localStorage.clear();
-            navigate("/", { replace: true }); 
-          }}>
+          <button className="menu-button" onClick={() => navigate("/guide")}>
+            Guide
+          </button>
+          <button
+            className="menu-button"
+            onClick={() => {
+              sessionStorage.clear();
+              navigate("/", { replace: true });
+            }}
+          >
             Quit
           </button>
         </div>
