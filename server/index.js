@@ -384,6 +384,94 @@ app.get('/api/lobby/:code/status', async (req, res) => {
   }
 });
 
+// Get chat state endpoint
+app.get('/api/game/:code/chat-state', async (req, res) => {
+  const { code } = req.params;
+  try {
+    const game = await Game.findOne({ code });
+    if (!game) return res.status(404).json({ error: "Game not found" });
+    
+    // Calculate actual time left based on start time if chat is active
+    let actualPhaseTimeLeft = game.phaseTimeLeft;
+    let actualTotalTimeLeft = game.totalTimeLeft;
+    let actualTestamentTimeLeft = game.testamentTimeLeft;
+    
+    if (game.chatStartTime && game.phase === 'day') {
+      const elapsedTime = Math.floor((Date.now() - game.chatStartTime.getTime()) / 1000);
+      actualPhaseTimeLeft = Math.max(0, game.phaseTimeLeft - elapsedTime);
+      actualTotalTimeLeft = Math.max(0, game.totalTimeLeft - elapsedTime);
+      
+      if (game.chatPhase === 'testaments' && game.currentTestamentPlayer) {
+        actualTestamentTimeLeft = Math.max(0, game.testamentTimeLeft - elapsedTime);
+      }
+    }
+    
+    res.json({
+      phase: game.phase,
+      chatPhase: game.chatPhase,
+      currentTestamentPlayer: game.currentTestamentPlayer,
+      testamentTimeLeft: actualTestamentTimeLeft,
+      phaseTimeLeft: actualPhaseTimeLeft,
+      totalTimeLeft: actualTotalTimeLeft,
+      testamentsWritten: game.testamentsWritten,
+      accusedPlayer: game.accusedPlayer,
+      votesToProceed: game.votesToProceed || []
+    });
+  } catch (err) {
+    console.error("Failed to get chat state:", err);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+// Update chat state endpoint
+app.post('/api/game/:code/chat-state', async (req, res) => {
+  const { code } = req.params;
+  const { 
+    chatPhase, 
+    currentTestamentPlayer, 
+    testamentTimeLeft, 
+    phaseTimeLeft, 
+    totalTimeLeft,
+    testamentsWritten,
+    accusedPlayer 
+  } = req.body;
+  
+  try {
+    const game = await Game.findOne({ code });
+    if (!game) return res.status(404).json({ error: "Game not found" });
+    
+    // Update chat state
+    if (chatPhase !== undefined) game.chatPhase = chatPhase;
+    if (currentTestamentPlayer !== undefined) game.currentTestamentPlayer = currentTestamentPlayer;
+    if (testamentTimeLeft !== undefined) game.testamentTimeLeft = testamentTimeLeft;
+    if (phaseTimeLeft !== undefined) game.phaseTimeLeft = phaseTimeLeft;
+    if (totalTimeLeft !== undefined) game.totalTimeLeft = totalTimeLeft;
+    if (testamentsWritten !== undefined) game.testamentsWritten = testamentsWritten;
+    if (accusedPlayer !== undefined) game.accusedPlayer = accusedPlayer;
+    
+    // Update timestamp
+    game.chatStartTime = new Date();
+    
+    await game.save();
+    
+    // Broadcast state update to all players
+    io.in(code).emit('chat-state-updated', {
+      chatPhase: game.chatPhase,
+      currentTestamentPlayer: game.currentTestamentPlayer,
+      testamentTimeLeft: game.testamentTimeLeft,
+      phaseTimeLeft: game.phaseTimeLeft,
+      totalTimeLeft: game.totalTimeLeft,
+      testamentsWritten: game.testamentsWritten,
+      accusedPlayer: game.accusedPlayer
+    });
+    
+    res.json({ message: "Chat state updated" });
+  } catch (err) {
+    console.error("Failed to update chat state:", err);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
 // ------------------ SOCKET.IO ------------------
 io.on('connection', socket => {
   const clientId = socket.id;
@@ -525,6 +613,37 @@ io.on('connection', socket => {
           console.log('Resolving night phase');
           const result = await resolveNightPhase(code);
           console.log('Night phase resolved, broadcasting end');
+          
+          // Initialize chat state when night ends
+          const game = await Game.findOne({ code });
+          if (game) {
+            game.phase = 'day';
+            game.chatStartTime = new Date();
+            
+            const deaths = result.deaths || [];
+            if (deaths.length === 0) {
+              // No deaths, skip testaments and go to discussions
+              game.chatPhase = 'discussions';
+              game.phaseTimeLeft = 300; // 5 minutes for discussions
+              game.totalTimeLeft = 330; // 5:30 total (5m discussions + 30s accusations)
+              game.currentTestamentPlayer = null;
+              game.testamentTimeLeft = 0;
+            } else {
+              // Start with testaments - all dead players get 20 seconds together
+              game.chatPhase = 'testaments';
+              game.currentTestamentPlayer = null; // No specific player, all can write
+              game.testamentTimeLeft = 20; // 20 seconds for all testaments
+              game.phaseTimeLeft = 20; // Phase time = testament time
+              game.totalTimeLeft = 20 + 300 + 30; // 20s testaments + 5m discussions + 30s accusations
+            }
+            
+            game.testamentsWritten = [];
+            game.accusedPlayer = null;
+            game.votesToProceed = [];
+            
+            await game.save();
+          }
+          
           io.in(code).emit('night-ended', result);
           console.log('Night end broadcast complete');
         } catch (error) {
@@ -534,6 +653,339 @@ io.on('connection', socket => {
       }
     } catch (error) {
       console.error('Error handling night action:', error);
+    }
+  });
+
+  // Chat message handling
+  socket.on('chat-message', ({ code, message }) => {
+    console.log('Chat message received:', { code, message });
+    // Broadcast the message to all players in the room
+    socket.to(code).emit('chat-message', { message });
+  });
+
+  // Join chat synchronization
+  socket.on('join-chat', async ({ code }) => {
+    try {
+      console.log('Client joining chat for code:', code);
+      const game = await Game.findOne({ code });
+      if (!game) {
+        console.log('Game not found for code:', code);
+        return;
+      }
+
+      // Calculate actual time left based on start time
+      let actualPhaseTimeLeft = game.phaseTimeLeft;
+      let actualTotalTimeLeft = game.totalTimeLeft;
+      let actualTestamentTimeLeft = game.testamentTimeLeft;
+      
+      if (game.chatStartTime && game.phase === 'day') {
+        const elapsedTime = Math.floor((Date.now() - game.chatStartTime.getTime()) / 1000);
+        actualPhaseTimeLeft = Math.max(0, game.phaseTimeLeft - elapsedTime);
+        actualTotalTimeLeft = Math.max(0, game.totalTimeLeft - elapsedTime);
+        
+        if (game.chatPhase === 'testaments' && game.currentTestamentPlayer) {
+          actualTestamentTimeLeft = Math.max(0, game.testamentTimeLeft - elapsedTime);
+        }
+      }
+
+      // Send current chat state to the joining client
+      socket.emit('chat-state-sync', {
+        chatPhase: game.chatPhase,
+        currentTestamentPlayer: game.currentTestamentPlayer,
+        testamentTimeLeft: actualTestamentTimeLeft,
+        phaseTimeLeft: actualPhaseTimeLeft,
+        totalTimeLeft: actualTotalTimeLeft,
+        testamentsWritten: game.testamentsWritten,
+        accusedPlayer: game.accusedPlayer,
+        votesToProceed: game.votesToProceed || []
+      });
+      
+      console.log('Chat state synced for joining client');
+    } catch (error) {
+      console.error('Error joining chat:', error);
+    }
+  });
+
+  // Chat state update from client
+  socket.on('update-chat-state', async ({ code, state }) => {
+    try {
+      console.log('Chat state update received:', { code, state });
+      
+      const game = await Game.findOne({ code });
+      if (!game) {
+        console.log('Game not found for code:', code);
+        return;
+      }
+
+      // Update the game state
+      if (state.chatPhase !== undefined) game.chatPhase = state.chatPhase;
+      if (state.currentTestamentPlayer !== undefined) game.currentTestamentPlayer = state.currentTestamentPlayer;
+      if (state.testamentTimeLeft !== undefined) game.testamentTimeLeft = state.testamentTimeLeft;
+      if (state.phaseTimeLeft !== undefined) game.phaseTimeLeft = state.phaseTimeLeft;
+      if (state.totalTimeLeft !== undefined) game.totalTimeLeft = state.totalTimeLeft;
+      if (state.testamentsWritten !== undefined) game.testamentsWritten = state.testamentsWritten;
+      if (state.accusedPlayer !== undefined) game.accusedPlayer = state.accusedPlayer;
+      
+      // Update timestamp
+      game.chatStartTime = new Date();
+      
+      await game.save();
+
+      // Broadcast state update to all other players
+      socket.to(code).emit('chat-state-updated', {
+        chatPhase: game.chatPhase,
+        currentTestamentPlayer: game.currentTestamentPlayer,
+        testamentTimeLeft: game.testamentTimeLeft,
+        phaseTimeLeft: game.phaseTimeLeft,
+        totalTimeLeft: game.totalTimeLeft,
+        testamentsWritten: game.testamentsWritten,
+        accusedPlayer: game.accusedPlayer
+      });
+      
+      console.log('Chat state updated and broadcasted');
+    } catch (error) {
+      console.error('Error updating chat state:', error);
+    }
+  });
+
+  // Voting system handlers
+  socket.on('join-voting', async ({ code }) => {
+    try {
+      console.log('Client joining voting for code:', code);
+      const game = await Game.findOne({ code });
+      if (!game) {
+        console.log('Game not found for code:', code);
+        return;
+      }
+
+      const currentPhase = game.phase || 'voting';
+      let timeLeft = 60; // Default time
+      let stateData = {};
+
+      if (currentPhase === 'voting') {
+        // Initialize voting state if not exists
+        if (!game.votingState) {
+          game.votingState = {
+            votes: new Map(),
+            timeLeft: 60,
+            startTime: new Date()
+          };
+          game.voteTimerStarted = false;
+          await game.save();
+        }
+
+        // Calculate actual time left only if startTime exists
+        if (game.votingState.startTime) {
+          const elapsedTime = Math.floor((Date.now() - game.votingState.startTime.getTime()) / 1000);
+          timeLeft = Math.max(0, game.votingState.timeLeft - elapsedTime);
+        }
+
+        // Convert Map to Object for transmission
+        const votesObject = Object.fromEntries(game.votingState.votes);
+
+        stateData = {
+          phase: 'voting',
+          timeLeft,
+          votes: votesObject
+        };
+
+        // Send current voting state
+        socket.emit('vote-update', {
+          votes: votesObject,
+          timeLeft
+        });
+
+        // Start vote timer if not already started and time remaining
+        if (!game.voteTimerStarted && timeLeft > 0) {
+          game.voteTimerStarted = true;
+          await game.save();
+          
+          console.log(`Starting vote timer for ${timeLeft} seconds`);
+          
+          setTimeout(async () => {
+            await endVotingPhase(code);
+          }, timeLeft * 1000);
+        } else if (timeLeft <= 0) {
+          // Time already expired, end voting immediately
+          console.log('Vote time expired, ending voting');
+          await endVotingPhase(code);
+          return;
+        }
+      } else if (currentPhase === 'results') {
+        stateData = {
+          phase: 'results',
+          voteResult: {
+            eliminatedPlayer: game.lastVoteResult?.eliminatedPlayer,
+            voteCounts: Object.fromEntries(game.lastVoteResult?.voteCounts || new Map()),
+            totalVotes: game.lastVoteResult?.totalVotes || 0,
+            tie: game.lastVoteResult?.tie || false
+          }
+        };
+      } else if (currentPhase === 'testament') {
+        // Calculate testament time left
+        if (game.testamentStartTime) {
+          const elapsedTime = Math.floor((Date.now() - game.testamentStartTime.getTime()) / 1000);
+          timeLeft = Math.max(0, 30 - elapsedTime);
+        } else {
+          timeLeft = 30;
+        }
+
+        stateData = {
+          phase: 'testament',
+          timeLeft,
+          eliminatedPlayer: game.eliminatedPlayer
+        };
+      } else if (currentPhase === 'game-over') {
+        // Game is over, should redirect to results
+        stateData = {
+          phase: 'game-over'
+        };
+      }
+
+      // Send complete state sync
+      socket.emit('voting-state-sync', stateData);
+      
+      console.log('Voting state synced for joining client:', stateData);
+    } catch (error) {
+      console.error('Error joining voting:', error);
+    }
+  });
+
+  socket.on('cast-vote', async ({ code, vote, username }) => {
+    try {
+      console.log('Vote cast:', { code, vote, username });
+      
+      const game = await Game.findOne({ code });
+      if (!game) {
+        console.log('Game not found for code:', code);
+        return;
+      }
+
+      const voter = game.players.find(p => p.username === username);
+      if (!voter || !voter.alive) {
+        console.log('Invalid voter or voter is dead');
+        return;
+      }
+
+      // Check if voter is vote-muted
+      if (voter.muted === 'vote') {
+        console.log('Voter is vote-muted');
+        return;
+      }
+
+      // Initialize voting state if not exists
+      if (!game.votingState) {
+        game.votingState = {
+          votes: new Map(),
+          timeLeft: 60,
+          startTime: new Date()
+        };
+      }
+
+      // Record the vote
+      game.votingState.votes.set(voter.username, vote);
+      await game.save();
+
+      // Calculate actual time left only if startTime exists
+      let actualTimeLeft = game.votingState.timeLeft;
+      if (game.votingState.startTime) {
+        const elapsedTime = Math.floor((Date.now() - game.votingState.startTime.getTime()) / 1000);
+        actualTimeLeft = Math.max(0, game.votingState.timeLeft - elapsedTime);
+      }
+
+      // Convert Map to Object for transmission
+      const votesObject = Object.fromEntries(game.votingState.votes);
+
+      // Broadcast vote update
+      io.in(code).emit('vote-update', {
+        votes: votesObject,
+        timeLeft: actualTimeLeft
+      });
+
+      // Check if all alive, non-muted players have voted
+      const eligibleVoters = game.players.filter(p => p.alive && p.muted !== 'vote');
+      const votedPlayers = Array.from(game.votingState.votes.keys());
+      
+      console.log('Vote check:', {
+        eligibleVoters: eligibleVoters.map(p => p.username),
+        votedPlayers: votedPlayers,
+        eligibleCount: eligibleVoters.length,
+        votedCount: votedPlayers.length
+      });
+
+      // If all eligible players have voted, end voting immediately
+      if (votedPlayers.length >= eligibleVoters.length) {
+        console.log('All eligible players have voted, ending voting immediately');
+        await endVotingPhase(code);
+      }
+
+      console.log('Vote recorded and broadcasted');
+    } catch (error) {
+      console.error('Error casting vote:', error);
+    }
+  });
+
+  socket.on('check-game-state', async ({ code }) => {
+    await checkGameStateAndProceed(code);
+  });
+
+  socket.on('testament-message', async ({ code, username, message }) => {
+    try {
+      console.log('📝 Received testament message:', { code, username, message });
+      await handleTestamentComplete(code, username, message);
+    } catch (error) {
+      console.error('❌ Error processing testament message:', error);
+    }
+  });
+
+  socket.on('vote-to-proceed', async ({ code, username }) => {
+    try {
+      console.log('Vote to proceed received:', { code, username });
+      
+      const game = await Game.findOne({ code });
+      if (!game) {
+        console.log('Game not found for code:', code);
+        return;
+      }
+
+      // Initialize votes array if it doesn't exist
+      if (!game.votesToProceed) {
+        game.votesToProceed = [];
+      }
+
+      // Add vote if not already voted
+      if (!game.votesToProceed.includes(username)) {
+        game.votesToProceed.push(username);
+        await game.save();
+      }
+
+      // Get count of alive players
+      const alivePlayers = game.players.filter(p => p.alive);
+      const totalVotes = game.votesToProceed.length;
+      const requiredVotes = alivePlayers.length;
+
+      console.log('Vote count:', { totalVotes, requiredVotes });
+
+      // Broadcast vote status to all players
+      io.in(code).emit('vote-to-proceed', { 
+        username, 
+        total: totalVotes, 
+        required: requiredVotes 
+      });
+
+      // If all alive players have voted, proceed to voting
+      if (totalVotes >= requiredVotes) {
+        console.log('All players voted to proceed');
+        // Reset votes for next phase and start voting
+        game.votesToProceed = [];
+        game.phase = 'voting';
+        await game.save();
+        
+        // Redirect all players to voting
+        io.in(code).emit('proceed-to-voting');
+      }
+    } catch (error) {
+      console.error('Error handling vote to proceed:', error);
     }
   });
 
@@ -549,6 +1001,371 @@ io.on('connection', socket => {
     }
   });
 });
+
+// Helper function to end voting phase
+async function endVotingPhase(code) {
+  try {
+    console.log('🗳️ Starting endVotingPhase for code:', code);
+    
+    const game = await Game.findOne({ code });
+    if (!game) {
+      console.log('❌ Game not found for code:', code);
+      return;
+    }
+    
+    if (game.phase !== 'voting') {
+      console.log(`⚠️ Game not in voting phase. Current phase: ${game.phase}`);
+      return;
+    }
+
+    const votesMap = game.votingState?.votes || new Map();
+    const votes = Object.fromEntries(votesMap);
+    const alivePlayers = game.players.filter(p => p.alive);
+    
+    console.log('📊 Ending voting phase with votes:', votes);
+    console.log('👥 Alive players:', alivePlayers.map(p => p.username));
+    
+    // Count votes
+    const voteCounts = {};
+    let totalVotes = 0;
+    
+    Object.values(votes).forEach(vote => {
+      if (vote && vote !== 'abstain') {
+        voteCounts[vote] = (voteCounts[vote] || 0) + 1;
+        totalVotes++;
+      }
+    });
+
+    // Add abstain votes to counts
+    const abstainCount = Object.values(votes).filter(vote => vote === 'abstain').length;
+    if (abstainCount > 0) {
+      voteCounts['abstain'] = abstainCount;
+    }
+
+    console.log('📈 Vote counts:', voteCounts, 'Total votes:', totalVotes);
+
+    // Find player(s) with most votes
+    const maxVotes = Math.max(...Object.values(voteCounts), 0);
+    const playersWithMaxVotes = Object.keys(voteCounts).filter(
+      player => voteCounts[player] === maxVotes && player !== 'abstain'
+    );
+
+    let eliminatedPlayer = null;
+    let tie = false;
+
+    // Determine elimination
+    if (maxVotes > 0 && playersWithMaxVotes.length === 1) {
+      eliminatedPlayer = playersWithMaxVotes[0];
+      console.log(`💀 Player eliminated: ${eliminatedPlayer}`);
+      
+      // Mark player as dead
+      const player = game.players.find(p => p.username === eliminatedPlayer);
+      if (player) {
+        player.alive = false;
+        
+        // Check if sacrifice was voted out
+        if (player.role === 'sacrifice') {
+          console.log('⚰️ Sacrifice was voted out - they win!');
+          // Sacrifice wins immediately
+          const gameResult = {
+            gameOver: true,
+            winner: 'sacrifice',
+            message: '⚰️ The Sacrifice has achieved their goal! They win by being voted out!',
+            alivePlayers: alivePlayers.filter(p => p.alive)
+          };
+          
+          game.phase = 'game-over';
+          await game.save();
+          console.log('🎮 Emitting game-over event');
+          io.in(code).emit('game-over', gameResult);
+          return;
+        }
+      }
+    } else if (playersWithMaxVotes.length > 1 && maxVotes > 0) {
+      tie = true;
+      console.log('🤝 Vote resulted in a tie');
+    } else {
+      console.log('🤷‍♀️ No majority reached');
+    }
+
+    const voteResult = {
+      eliminatedPlayer,
+      voteCounts,
+      totalVotes: Object.values(votes).length,
+      tie
+    };
+
+    console.log('📋 Final vote result:', voteResult);
+
+    // Store vote result and update game phase
+    game.lastVoteResult = {
+      eliminatedPlayer,
+      voteCounts: new Map(Object.entries(voteCounts)),
+      totalVotes: Object.values(votes).length,
+      tie
+    };
+    game.eliminatedPlayer = eliminatedPlayer;
+    game.phase = 'results';
+    game.votingState = null;
+    game.voteTimerStarted = false;
+    await game.save();
+
+    console.log('💾 Game state updated, emitting vote-ended event');
+    
+    // Get all sockets in the room to verify broadcast
+    const socketsInRoom = await io.in(code).fetchSockets();
+    console.log(`📡 Broadcasting to ${socketsInRoom.length} sockets in room ${code}`);
+    
+    // Broadcast vote result
+    io.in(code).emit('vote-ended', voteResult);
+    console.log('📡 vote-ended event emitted to room:', code);
+    
+    // Also emit directly to ensure delivery
+    socketsInRoom.forEach(socket => {
+      console.log(`📤 Emitting vote-ended directly to socket ${socket.id}`);
+      socket.emit('vote-ended', voteResult);
+    });
+
+    // If someone was eliminated, transition to testament phase after results
+    if (eliminatedPlayer) {
+      console.log(`📝 Will start testament phase for ${eliminatedPlayer} in 3 seconds`);
+      setTimeout(async () => {
+        const updatedGame = await Game.findOne({ code });
+        if (updatedGame) {
+          updatedGame.phase = 'testament';
+          updatedGame.testamentStartTime = new Date();
+          await updatedGame.save();
+          
+          console.log(`📝 Testament phase started for ${eliminatedPlayer}`);
+          
+          // Start testament timer
+          setTimeout(async () => {
+            // Auto-complete testament if no message sent
+            const finalGame = await Game.findOne({ code });
+            if (finalGame && finalGame.phase === 'testament') {
+              console.log('⏰ Testament time expired, auto-completing');
+              await handleTestamentComplete(code, eliminatedPlayer, null);
+            }
+          }, 30000);
+        }
+      }, 3000);
+    } else {
+      // No elimination, check game state after results display
+      console.log('➡️ No elimination, will check game state in 3 seconds');
+      setTimeout(async () => {
+        await checkGameStateAndProceed(code);
+      }, 3000);
+    }
+    
+    console.log('✅ Voting phase ended successfully');
+  } catch (error) {
+    console.error('❌ Error ending voting phase:', error);
+  }
+}
+
+// Helper function to handle testament completion
+async function handleTestamentComplete(code, username, message) {
+  try {
+    console.log('📝 Testament completed:', { code, username, message });
+    
+    const game = await Game.findOne({ code });
+    if (!game) {
+      console.log('❌ Game not found for testament');
+      return;
+    }
+
+    // Store testament in game history
+    const currentRound = game.history[game.history.length - 1];
+    if (currentRound) {
+      if (!currentRound.testaments) {
+        currentRound.testaments = [];
+      }
+      currentRound.testaments.push({
+        username,
+        message: message || 'No final words...',
+        timestamp: new Date()
+      });
+      await game.save();
+    }
+    
+    // Broadcast testament to all players
+    console.log('📡 Broadcasting testament to all players');
+    io.in(code).emit('testament-received', {
+      username,
+      message: message || 'No final words...'
+    });
+    
+    // Wait a moment to ensure testament is displayed
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    
+    // Check game state after testament
+    console.log('🔄 Checking game state after testament');
+    await checkGameStateAndProceed(code);
+    
+  } catch (error) {
+    console.error('❌ Error handling testament completion:', error);
+  }
+}
+
+// Helper function to check game state and proceed
+async function checkGameStateAndProceed(code) {
+  try {
+    console.log('🔄 Checking game state and proceeding...');
+    const gameResult = await checkVictoryConditions(code);
+    
+    if (gameResult.gameOver) {
+      console.log('🎮 Game is over, emitting game-over event');
+      const game = await Game.findOne({ code });
+      if (game) {
+        game.phase = 'game-over';
+        await game.save();
+      }
+      io.in(code).emit('game-over', gameResult);
+    } else {
+      // Start next round
+      console.log('🌙 Starting next round...');
+      const game = await Game.findOne({ code });
+      if (game) {
+        // Increment round number
+        game.round += 1;
+        
+        // Reset all phase-related state
+        game.phase = 'night';
+        game.chatPhase = 'testaments';
+        game.votingState = {
+          votes: new Map(),
+          timeLeft: 60,
+          startTime: new Date()
+        };
+        game.voteTimerStarted = false;
+        game.votesToProceed = [];
+        game.lastVoteResult = null;
+        game.eliminatedPlayer = null;
+        game.testamentStartTime = null;
+        game.currentRole = null; // Will be set when night phase starts
+        
+        // Add new round to history
+        game.history.push({
+          round: game.round,
+          nightActions: [],
+          resolvedDeaths: []
+        });
+        
+        await game.save();
+        console.log(`✅ Round ${game.round} initialized`);
+      }
+      
+      // Emit next round event after a small delay
+      setTimeout(() => {
+        console.log('📡 Emitting next-round event');
+        io.in(code).emit('next-round');
+      }, 1000);
+    }
+  } catch (error) {
+    console.error('❌ Error checking game state and proceeding:', error);
+  }
+}
+
+// Helper function to check victory conditions
+async function checkVictoryConditions(code) {
+  try {
+    const game = await Game.findOne({ code });
+    if (!game) return { gameOver: false };
+
+    const alivePlayers = game.players.filter(p => p.alive);
+    
+    // Count factions
+    const mafia = alivePlayers.filter(p => ['killer', 'mutilator'].includes(p.role));
+    const town = alivePlayers.filter(p => 
+      ['queen', 'doctor', 'policeman', 'sheriff', 'lookout', 'mayor', 'citizen'].includes(p.role)
+    );
+    const serialKiller = alivePlayers.filter(p => p.role === 'serial-killer');
+    const sacrifice = alivePlayers.filter(p => p.role === 'sacrifice');
+
+    console.log('Victory check:', {
+      total: alivePlayers.length,
+      alivePlayers: alivePlayers.map(p => ({ username: p.username, role: p.role })),
+      mafia: mafia.length,
+      town: town.length,
+      serialKiller: serialKiller.length,
+      sacrifice: sacrifice.length
+    });
+
+    // Check edge case: only 1 or 2 players left
+    if (alivePlayers.length <= 1) {
+      if (serialKiller.length > 0) {
+        return {
+          gameOver: true,
+          winner: 'serial-killer',
+          message: '🔪 The Serial Killer has eliminated everyone! Chaos reigns supreme!',
+          alivePlayers
+        };
+      } else if (mafia.length > 0) {
+        return {
+          gameOver: true,
+          winner: 'mafia',
+          message: '🔴 The Mafia has taken control! Darkness triumphs!',
+          alivePlayers
+        };
+      } else if (town.length > 0) {
+        return {
+          gameOver: true,
+          winner: 'town',
+          message: '🏛️ The Town survives! Justice triumphs!',
+          alivePlayers
+        };
+      }
+    }
+
+    // Serial Killer wins if they're the last player or among the last 2 (with advantage)
+    if (serialKiller.length > 0 && alivePlayers.length <= 2) {
+      return {
+        gameOver: true,
+        winner: 'serial-killer',
+        message: '🔪 The Serial Killer has eliminated everyone! Chaos reigns supreme!',
+        alivePlayers
+      };
+    }
+
+    // Mafia wins if they equal or outnumber non-mafia players (excluding serial killer if present)
+    const nonMafiaPlayers = town.length + sacrifice.length;
+    if (mafia.length > 0 && mafia.length >= nonMafiaPlayers && serialKiller.length === 0) {
+      return {
+        gameOver: true,
+        winner: 'mafia',
+        message: '🔴 The Mafia has taken control of the town! Darkness prevails!',
+        alivePlayers
+      };
+    }
+
+    // Town wins if all threats are eliminated (mafia + serial killer + sacrifice)
+    if (mafia.length === 0 && serialKiller.length === 0 && sacrifice.length === 0) {
+      return {
+        gameOver: true,
+        winner: 'town',
+        message: '🏛️ The Town has restored peace! Justice prevails!',
+        alivePlayers
+      };
+    }
+
+    // Special case: if only town vs sacrifice, town wins
+    if (mafia.length === 0 && serialKiller.length === 0 && town.length > 0 && sacrifice.length > 0) {
+      return {
+        gameOver: true,
+        winner: 'town',
+        message: '🏛️ The Town has eliminated all threats! Justice prevails!',
+        alivePlayers
+      };
+    }
+
+    // Game continues
+    console.log('Game continues - no victory condition met');
+    return { gameOver: false };
+  } catch (error) {
+    console.error('Error checking victory conditions:', error);
+    return { gameOver: false };
+  }
+}
 
 // ------------------ START SERVER ------------------
 server.listen(PORT, () => {
