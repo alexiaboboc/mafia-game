@@ -20,7 +20,13 @@
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
   text-align: center;
   width: 400px;
-  margin-top:-10vh;
+  margin-top: -10vh;
+}
+
+.voting-container.game-over {
+  width: 500px;
+  max-height: 80vh;
+  overflow-y: auto;
 }
 
 .voting-title {
@@ -29,16 +35,54 @@
   margin-bottom: 0.5rem;
 }
 
+.vote-timer {
+  font-size: 1.2rem;
+  color: #ff6b6b;
+  font-weight: 600;
+  background: rgba(255, 107, 107, 0.2);
+  padding: 0.5rem 1rem;
+  border-radius: 12px;
+  border: 2px solid rgba(255, 107, 107, 0.4);
+  margin-bottom: 1rem;
+}
+
+.testament-timer {
+  font-size: 1.1rem;
+  color: #ffd43b;
+  font-weight: 600;
+  background: rgba(255, 212, 59, 0.2);
+  padding: 0.4rem 0.8rem;
+  border-radius: 10px;
+  border: 2px solid rgba(255, 212, 59, 0.4);
+  margin-bottom: 1rem;
+}
+
 .voting-instruction {
   font-size: 1rem;
   margin-bottom: 1.5rem;
+}
+
+.voting-section {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.voting-spectator {
+  font-size: 1rem;
+  color: rgba(255, 255, 255, 0.7);
+  font-style: italic;
+  margin: 2rem 0;
+  padding: 1rem;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 12px;
 }
 
 .voting-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
   gap: 1rem;
-  margin-bottom: 1.5rem;
+  margin-bottom: 1rem;
 }
 
 .vote-box {
@@ -58,54 +102,430 @@
   background-color: #b175ff;
   color: white;
   font-weight: 600;
+  border-color: #b175ff;
+}
+
+.vote-submit-section {
+  text-align: center;
+  background: rgba(255, 255, 255, 0.05);
+  padding: 1rem;
+  border-radius: 12px;
+  margin-top: 1rem;
+}
+
+.selected-vote {
+  font-size: 1rem;
+  margin-bottom: 1rem;
+  color: #b175ff;
+}
+
+.submit-vote-button {
+  padding: 0.8rem 2rem;
+  background: rgba(177, 117, 255, 0.2);
+  border: 2px solid #b175ff;
+  border-radius: 12px;
+  color: #b175ff;
+  font-weight: 600;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: all 0.25s ease;
+  font-family: 'Chakra Petch', sans-serif;
+}
+
+.submit-vote-button:hover {
+  background: rgba(177, 117, 255, 0.4);
+  transform: scale(1.05);
 }
 
 .voting-result {
   font-size: 1rem;
   margin-top: 1rem;
   color: #b175ff;
+  text-align: center;
+  background: rgba(177, 117, 255, 0.1);
+  padding: 1rem;
+  border-radius: 12px;
+  border: 2px solid rgba(177, 117, 255, 0.3);
 }
+
+.waiting-message {
+  font-size: 0.9rem;
+  color: rgba(255, 255, 255, 0.8);
+  margin-top: 0.5rem;
+  font-style: italic;
+}
+
+/* Vote Results Styles */
+.vote-results {
+  text-align: center;
+}
+
+.result-message h2 {
+  font-size: 1.4rem;
+  margin-bottom: 1.5rem;
+  color: #b175ff;
+}
+
+.vote-breakdown {
+  background: rgba(255, 255, 255, 0.05);
+  padding: 1rem;
+  border-radius: 12px;
+  margin-top: 1rem;
+}
+
+.vote-breakdown h3 {
+  font-size: 1.1rem;
+  margin-bottom: 0.8rem;
+  color: #74c0fc;
+}
+
+.vote-count {
+  font-size: 0.95rem;
+  margin-bottom: 0.3rem;
+  padding: 0.3rem 0.6rem;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+}
+
+.vote-total {
+  font-size: 0.9rem;
+  margin-top: 0.5rem;
+  padding: 0.4rem 0.8rem;
+  background: rgba(116, 192, 252, 0.2);
+  border-radius: 8px;
+  color: #74c0fc;
+  font-weight: 600;
+}
+
+/* Testament Styles */
+.testament-container {
+  width: 450px;
+}
+
+.testament-section {
+  text-align: center;
+}
+
+.testament-instruction {
+  font-size: 1rem;
+  margin-bottom: 1rem;
+  color: #ffd43b;
+}
+
+.testament-input {
+  width: 100%;
+  min-height: 80px;
+  padding: 0.8rem;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.1);
+  color: white;
+  font-family: 'Chakra Petch', sans-serif;
+  font-size: 0.95rem;
+  resize: vertical;
+  margin-bottom: 1rem;
+}
+
+.testament-input::placeholder {
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.testament-input:focus {
+  outline: none;
+  border-color: #ffd43b;
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.testament-input:disabled {
+  background: rgba(255, 255, 255, 0.05);
+  cursor: not-allowed;
+}
+
+.testament-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+}
+
+.testament-submit {
+  padding: 0.8rem 1.5rem;
+  background: rgba(255, 212, 59, 0.2);
+  border: 2px solid #ffd43b;
+  border-radius: 12px;
+  color: #ffd43b;
+  font-weight: 600;
+  font-size: 0.95rem;
+  cursor: pointer;
+  transition: all 0.25s ease;
+  font-family: 'Chakra Petch', sans-serif;
+}
+
+.testament-submit:hover:not(:disabled) {
+  background: rgba(255, 212, 59, 0.3);
+  transform: scale(1.05);
+}
+
+.testament-submit:disabled {
+  background: rgba(255, 212, 59, 0.1);
+  border-color: rgba(255, 212, 59, 0.5);
+  cursor: not-allowed;
+  transform: none;
+}
+
+.character-count {
+  font-size: 0.85rem;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.testament-waiting {
+  font-size: 1.1rem;
+  color: rgba(255, 255, 255, 0.8);
+  font-style: italic;
+  margin: 2rem 0;
+  text-align: center;
+}
+
+.waiting-indicator {
+  font-size: 2rem;
+  margin-top: 1rem;
+  animation: pulse 1.5s infinite;
+}
+
+/* Game Over Styles */
+.game-result {
+  text-align: center;
+}
+
+.winner-announcement {
+  margin-bottom: 2rem;
+  padding: 1.5rem;
+  border-radius: 15px;
+  font-weight: 600;
+}
+
+.winner-announcement.mafia {
+  background: rgba(255, 107, 107, 0.2);
+  border: 2px solid #ff6b6b;
+  color: #ff6b6b;
+}
+
+.winner-announcement.town {
+  background: rgba(116, 192, 252, 0.2);
+  border: 2px solid #74c0fc;
+  color: #74c0fc;
+}
+
+.winner-announcement.sacrifice {
+  background: rgba(255, 146, 43, 0.2);
+  border: 2px solid #ff922b;
+  color: #ff922b;
+}
+
+.winner-announcement.serial-killer {
+  background: rgba(134, 142, 150, 0.2);
+  border: 2px solid #868e96;
+  color: #868e96;
+}
+
+.survivors {
+  background: rgba(255, 255, 255, 0.05);
+  padding: 1rem;
+  border-radius: 12px;
+  margin-bottom: 1.5rem;
+}
+
+.survivors h3 {
+  font-size: 1.1rem;
+  margin-bottom: 0.8rem;
+  color: #74c0fc;
+}
+
+.survivor {
+  font-size: 0.95rem;
+  margin-bottom: 0.3rem;
+  padding: 0.4rem 0.8rem;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+}
+
+.new-game-button {
+  padding: 1rem 2rem;
+  background: rgba(177, 117, 255, 0.2);
+  border: 2px solid #b175ff;
+  border-radius: 12px;
+  color: #b175ff;
+  font-weight: 600;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: all 0.25s ease;
+  font-family: 'Chakra Petch', sans-serif;
+}
+
+.new-game-button:hover {
+  background: rgba(177, 117, 255, 0.3);
+  transform: scale(1.05);
+}
+
+/* Next Round Styles */
+.next-round-message {
+  font-size: 1.1rem;
+  color: rgba(255, 255, 255, 0.8);
+  font-style: italic;
+  margin: 2rem 0;
+}
+
+.round-transition {
+  font-size: 1rem;
+  color: #74c0fc;
+  background: rgba(116, 192, 252, 0.2);
+  padding: 0.8rem;
+  border-radius: 12px;
+  margin-top: 1rem;
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.05); opacity: 0.8; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
 @media (max-width: 768px) {
-    .voting-container {
-      width: 85%;
-      padding: 1.5rem;
-      margin-top: -5vh;
-    }
-  
-    .voting-title {
-      font-size: 1.3rem;
-    }
-  
-    .voting-instruction {
-      font-size: 0.95rem;
-    }
-  
-    .voting-grid {
-      grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
-      gap: 0.8rem;
-    }
-  
-    .vote-box {
-      font-size: 0.95rem;
-      padding: 0.6rem;
-    }
+  .voting-container {
+    width: 85%;
+    padding: 1.5rem;
+    margin-top: -5vh;
   }
-  
-  @media (max-width: 480px) {
-    .voting-title {
-      font-size: 1.1rem;
-    }
-  
-    .voting-instruction {
-      font-size: 0.9rem;
-    }
-  
-    .vote-box {
-      font-size: 0.9rem;
-      padding: 0.5rem;
-    }
-  
-    .voting-result {
-      font-size: 0.95rem;
-    }
+
+  .voting-container.game-over {
+    width: 90%;
+    max-height: 85vh;
   }
+
+  .testament-container {
+    width: 90%;
+  }
+
+  .voting-title {
+    font-size: 1.3rem;
+  }
+
+  .vote-timer {
+    font-size: 1rem;
+    padding: 0.4rem 0.8rem;
+  }
+
+  .testament-timer {
+    font-size: 1rem;
+    padding: 0.3rem 0.6rem;
+  }
+
+  .voting-instruction {
+    font-size: 0.95rem;
+  }
+
+  .voting-grid {
+    grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+    gap: 0.8rem;
+  }
+
+  .vote-box {
+    font-size: 0.95rem;
+    padding: 0.6rem;
+  }
+
+  .submit-vote-button {
+    font-size: 0.9rem;
+    padding: 0.7rem 1.5rem;
+  }
+
+  .testament-input {
+    min-height: 60px;
+    font-size: 0.9rem;
+  }
+
+  .testament-actions {
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .winner-announcement h2 {
+    font-size: 1.2rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .voting-title {
+    font-size: 1.1rem;
+  }
+
+  .vote-timer {
+    font-size: 0.9rem;
+  }
+
+  .testament-timer {
+    font-size: 0.9rem;
+  }
+
+  .voting-instruction {
+    font-size: 0.9rem;
+  }
+
+  .vote-box {
+    font-size: 0.9rem;
+    padding: 0.5rem;
+  }
+
+  .voting-result {
+    font-size: 0.95rem;
+  }
+
+  .submit-vote-button {
+    font-size: 0.85rem;
+    padding: 0.6rem 1.2rem;
+  }
+
+  .testament-input {
+    font-size: 0.85rem;
+  }
+
+  .testament-submit {
+    font-size: 0.9rem;
+    padding: 0.7rem 1.2rem;
+  }
+
+  .new-game-button {
+    font-size: 0.9rem;
+    padding: 0.8rem 1.5rem;
+  }
+}
+
+.testament-display {
+  background-color: rgba(255, 255, 255, 0.9);
+  border-radius: 8px;
+  padding: 20px;
+  margin: 20px auto;
+  max-width: 600px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.testament-author {
+  font-size: 1.2em;
+  color: #444;
+  margin-bottom: 10px;
+  font-weight: bold;
+}
+
+.testament-message {
+  font-size: 1.1em;
+  line-height: 1.5;
+  color: #333;
+  padding: 15px;
+  background-color: #f8f8f8;
+  border-radius: 4px;
+  border-left: 4px solid #2c3e50;
+  margin-top: 10px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}

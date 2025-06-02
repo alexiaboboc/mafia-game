@@ -277,7 +277,21 @@ export default function NightActions() {
         });
       }
       setNightEnded(true);
-      setTimeout(() => navigate("/chat"), 5000);
+      
+      // Pass night result data to Chat component
+      setTimeout(() => {
+        navigate("/chat", { 
+          state: { 
+            gameState: {
+              deaths: data.deaths || [],
+              muted: data.muted || [],
+              wills: data.wills || { withWills: [], withoutWills: [] },
+              investigations: data.investigations,
+              lookoutResults: data.lookoutResults
+            }
+          } 
+        });
+      }, 5000);
     };
 
     // Register socket event listeners

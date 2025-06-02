@@ -50,7 +50,7 @@ export default function EnterCode() {
               type="text"
               value={code}
               onChange={handleChange}
-              placeholder="XXXXXX"
+              placeholder="ABCDEF"
               className="code-input"
             />
           </div>
