@@ -571,85 +571,83 @@ io.on('connection', socket => {
         return;
       }
 
-      // Get actual roles in the game, not from roleOrder
+      // Get actual roles in the game
       const actualGameRoles = game.players.map(p => p.role);
-      
-      // Filter roleOrder to only include roles that are actually in this game
       const rolesInGame = roleOrder.filter(r => actualGameRoles.includes(r));
-      
-      console.log('Actual roles in game:', actualGameRoles);
-      console.log('Ordered roles for night:', rolesInGame);
-
       const currentRoleIndex = rolesInGame.indexOf(role);
-      console.log('Current role index:', currentRoleIndex);
 
-      // Broadcast completion to all clients
-      console.log('Broadcasting completion to all clients');
+      // Broadcast completion
       io.in(code).emit('night-action-completed', { role, target });
-      console.log('Completion broadcast complete');
 
-      // Proceed to next role after a delay
       if (currentRoleIndex < rolesInGame.length - 1) {
         const nextRole = rolesInGame[currentRoleIndex + 1];
-        console.log('Will start next role:', nextRole, 'in 3 seconds');
-        
-        // Store the next role in the game state
         game.currentRole = nextRole;
         await game.save();
         
-        // Wait for 3 seconds before starting next role
         await new Promise(resolve => setTimeout(resolve, 3000));
         
-        console.log('Starting next role:', nextRole);
-        // Re-emit to all clients in case some reconnected
-        io.in(code).emit('night-action-started', { role: nextRole });
-        console.log('Next role event emitted');
-      } else {
-        console.log('All roles completed, will end night phase in 3 seconds');
-        // Wait for 3 seconds before ending night
-        await new Promise(resolve => setTimeout(resolve, 3000));
+        const nextRolePlayer = game.players.find(p => p.role === nextRole);
         
-        try {
-          console.log('Resolving night phase');
-          const result = await resolveNightPhase(code);
-          console.log('Night phase resolved, broadcasting end');
+        // Check if next role's player is dead
+        if (nextRolePlayer && !nextRolePlayer.alive) {
+          // Show dead player's quote
+          io.in(code).emit('night-action-started', { 
+            role: nextRole,
+            isDead: true,
+            narration: `${nextRolePlayer.username} (${nextRole}) is no longer with us...`
+          });
           
-          // Initialize chat state when night ends
-          const game = await Game.findOne({ code });
-          if (game) {
-            game.phase = 'day';
-            game.chatStartTime = new Date();
+          await new Promise(resolve => setTimeout(resolve, 5000));
+          
+          // Find next alive role
+          const nextAliveRoleIndex = rolesInGame.findIndex((r, i) => 
+            i > currentRoleIndex + 1 && game.players.find(p => p.role === r)?.alive
+          );
+          
+          if (nextAliveRoleIndex !== -1) {
+            const nextAliveRole = rolesInGame[nextAliveRoleIndex];
+            game.currentRole = nextAliveRole;
+            await game.save();
             
-            const deaths = result.deaths || [];
-            if (deaths.length === 0) {
-              // No deaths, skip testaments and go to discussions
-              game.chatPhase = 'discussions';
-              game.phaseTimeLeft = 300; // 5 minutes for discussions
-              game.totalTimeLeft = 330; // 5:30 total (5m discussions + 30s accusations)
-              game.currentTestamentPlayer = null;
-              game.testamentTimeLeft = 0;
-            } else {
-              // Start with testaments - all dead players get 20 seconds together
-              game.chatPhase = 'testaments';
-              game.currentTestamentPlayer = null; // No specific player, all can write
-              game.testamentTimeLeft = 20; // 20 seconds for all testaments
-              game.phaseTimeLeft = 20; // Phase time = testament time
-              game.totalTimeLeft = 20 + 300 + 30; // 20s testaments + 5m discussions + 30s accusations
+            // Handle mutilator promotion to killer
+            if (nextAliveRole === 'mutilator') {
+              const mutilator = game.players.find(p => p.role === 'mutilator');
+              const killer = game.players.find(p => p.role === 'killer');
+              
+              if (mutilator && mutilator.alive && killer && !killer.alive) {
+                // Promote mutilator to killer
+                mutilator.role = 'killer';
+                await game.save();
+                
+                // Show promotion message
+                io.in(code).emit('night-action-started', { 
+                  role: 'mutilator',
+                  isPromoted: true,
+                  narration: `${mutilator.username} has been promoted to Killer!`
+                });
+                
+                await new Promise(resolve => setTimeout(resolve, 5000));
+                
+                // Update game roles
+                const updatedGame = await Game.findOne({ code });
+                if (updatedGame) {
+                  const updatedRoles = updatedGame.players.map(p => p.role);
+                  const updatedRolesInGame = roleOrder.filter(r => updatedRoles.includes(r));
+                  io.in(code).emit('roles-updated', { roles: updatedRolesInGame });
+                }
+              }
             }
             
-            game.testamentsWritten = [];
-            game.accusedPlayer = null;
-            game.votesToProceed = [];
-            
-            await game.save();
+            io.in(code).emit('night-action-started', { role: nextAliveRole });
+          } else {
+            await endNightPhase(code);
           }
-          
-          io.in(code).emit('night-ended', result);
-          console.log('Night end broadcast complete');
-        } catch (error) {
-          console.error('Error resolving night phase:', error);
-          io.in(code).emit('night-ended', { error: 'Failed to resolve night phase' });
+        } else {
+          io.in(code).emit('night-action-started', { role: nextRole });
         }
+      } else {
+        await new Promise(resolve => setTimeout(resolve, 3000));
+        await endNightPhase(code);
       }
     } catch (error) {
       console.error('Error handling night action:', error);
@@ -880,6 +878,7 @@ io.on('connection', socket => {
           timeLeft: 60,
           startTime: new Date()
         };
+        game.voteTimerStarted = false;
       }
 
       // Record the vote
@@ -1364,6 +1363,51 @@ async function checkVictoryConditions(code) {
   } catch (error) {
     console.error('Error checking victory conditions:', error);
     return { gameOver: false };
+  }
+}
+
+// Helper function to end night phase
+async function endNightPhase(code) {
+  try {
+    console.log('Resolving night phase');
+    const result = await resolveNightPhase(code);
+    console.log('Night phase resolved, broadcasting end');
+    
+    // Initialize chat state when night ends
+    const game = await Game.findOne({ code });
+    if (game) {
+      game.phase = 'day';
+      game.chatStartTime = new Date();
+      
+      const deaths = result.deaths || [];
+      if (deaths.length === 0) {
+        // No deaths, skip testaments and go to discussions
+        game.chatPhase = 'discussions';
+        game.phaseTimeLeft = 300; // 5 minutes for discussions
+        game.totalTimeLeft = 330; // 5:30 total (5m discussions + 30s accusations)
+        game.currentTestamentPlayer = null;
+        game.testamentTimeLeft = 0;
+      } else {
+        // Start with testaments - all dead players get 20 seconds together
+        game.chatPhase = 'testaments';
+        game.currentTestamentPlayer = null; // No specific player, all can write
+        game.testamentTimeLeft = 20; // 20 seconds for all testaments
+        game.phaseTimeLeft = 20; // Phase time = testament time
+        game.totalTimeLeft = 20 + 300 + 30; // 20s testaments + 5m discussions + 30s accusations
+      }
+      
+      game.testamentsWritten = [];
+      game.accusedPlayer = null;
+      game.votesToProceed = [];
+      
+      await game.save();
+    }
+    
+    io.in(code).emit('night-ended', result);
+    console.log('Night end broadcast complete');
+  } catch (error) {
+    console.error('Error resolving night phase:', error);
+    io.in(code).emit('night-ended', { error: 'Failed to resolve night phase' });
   }
 }
 
