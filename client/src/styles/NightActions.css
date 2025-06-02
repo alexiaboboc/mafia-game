@@ -7,7 +7,7 @@
   flex-direction: column;
   align-items: center;
   justify-content: flex-start;
-  padding-top: 9vh;
+  padding-top: 5vh;
   box-sizing: border-box;
   font-family: "Chakra Petch", sans-serif;
   color: white;
@@ -25,6 +25,14 @@
   flex-direction: column;
   align-items: center;
   gap: 2rem;
+  position: relative;
+}
+
+.night-actions-container.mutilator-active {
+  padding-top: 1rem;
+  gap: 1.5rem;
+  max-height: 85vh;
+  overflow-y: auto;
 }
 
 .night-text {
@@ -41,7 +49,7 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 1.5rem;
+  gap: 0rem;
 }
 
 .your-turn {
@@ -49,6 +57,15 @@
   font-weight: 600;
   margin-bottom: 0.4rem;
   text-shadow: 0 1px 6px rgba(0, 0, 0, 0.3);
+}
+
+.turn-instruction {
+  font-size: 1rem;
+  font-weight: 400;
+  color: rgba(255, 255, 255, 0.9);
+  text-align: center;
+  margin-bottom: 1rem;
+  line-height: 1.4;
 }
 
 .card-grid {
@@ -61,7 +78,6 @@
 .your-role-img {
   width: 190px;
   border-radius: 12px;
-
 }
 
 .target-grid {
@@ -90,6 +106,151 @@
   background-color: rgba(255, 255, 255, 0.25);
 }
 
+.target-box.self-heal {
+  background-color: rgba(76, 175, 80, 0.2);
+  border-color: rgba(76, 175, 80, 0.8);
+  font-weight: 600;
+}
+
+.target-box.self-heal:hover {
+  background-color: rgba(76, 175, 80, 0.3);
+  border-color: rgba(76, 175, 80, 1);
+}
+
+.no-action-message {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem;
+}
+
+.no-action-message p {
+  font-size: 1rem;
+  color: rgba(255, 255, 255, 0.8);
+  text-align: center;
+  margin: 0;
+}
+
+.continue-button {
+  background-color: rgba(70, 188, 161, 0.6);
+  border: 2px solid rgba(70, 188, 161, 0.8);
+  border-radius: 12px;
+  padding: 0.8rem 2rem;
+  color: white;
+  font-size: 1rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  backdrop-filter: blur(10px);
+}
+
+.continue-button:hover {
+  background-color: rgba(70, 188, 161, 0.8);
+  border-color: rgba(70, 188, 161, 1);
+  transform: scale(1.05);
+}
+
+.mutilator-choice {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.8rem;
+  padding: 0.8rem;
+  width: 100%;
+  max-width: 380px;
+}
+
+.mutilator-choice p {
+  font-size: 0.95rem;
+  color: rgba(255, 255, 255, 0.9);
+  text-align: center;
+  margin: 0;
+}
+
+.mutilator-choice strong {
+  color: #fff;
+  font-weight: 600;
+}
+
+.mute-buttons {
+  display: flex;
+  gap: 0.8rem;
+  width: 100%;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.mute-button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.2rem;
+  background-color: rgba(255, 152, 0, 0.6);
+  border: 2px solid rgba(255, 152, 0, 0.8);
+  border-radius: 12px;
+  padding: 0.8rem;
+  color: white;
+  font-size: 0.95rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  backdrop-filter: blur(10px);
+  flex: 1;
+  min-width: 140px;
+}
+
+.mute-button:hover {
+  background-color: rgba(255, 152, 0, 0.8);
+  border-color: rgba(255, 152, 0, 1);
+  transform: scale(1.05);
+}
+
+.mute-button.chat {
+  background-color: rgba(244, 67, 54, 0.429);
+  border-color: rgba(244, 67, 54, 0.575);
+}
+
+.mute-button.chat:hover {
+  background-color: rgba(244, 67, 54, 0.8);
+  border-color: rgba(244, 67, 54, 1);
+}
+
+.mute-button.vote {
+  background-color: rgba(70, 188, 161, 0.6);
+  border-color: rgba(70, 188, 161, 0.8);
+}
+
+.mute-button.vote:hover {
+  background-color: rgba(70, 188, 161, 0.8);
+  border-color: rgba(70, 188, 161, 1);
+}
+
+.mute-button small {
+  font-size: 0.75rem;
+  font-weight: 400;
+  opacity: 0.8;
+  text-align: center;
+}
+
+.back-button {
+  background-color: rgba(96, 125, 139, 0.6);
+  border: 2px solid rgba(96, 125, 139, 0.8);
+  border-radius: 8px;
+  padding: 0.4rem 0.8rem;
+  color: white;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  backdrop-filter: blur(10px);
+  width:100%;
+}
+
+.back-button:hover {
+  background-color: rgba(96, 125, 139, 0.8);
+  border-color: rgba(96, 125, 139, 1);
+}
+
 @keyframes fadeInSlideUp {
   from {
     opacity: 0;
@@ -107,9 +268,19 @@
 }
 
 @media (max-width: 768px) {
+    .night-actions-wrapper {
+      padding-top: 3vh;
+    }
+
     .night-actions-container {
       width: 85%;
       padding: 1.5rem;
+    }
+
+    .night-actions-container.mutilator-active {
+      padding: 1rem;
+      gap: 1rem;
+      max-height: 90vh;
     }
   
     .night-text {
@@ -138,12 +309,38 @@
       width: 80%;
       max-width: 240px;
     }
+
+    .mutilator-choice {
+      max-width: 100%;
+      padding: 0.5rem;
+    }
+
+    .mute-buttons {
+      flex-direction: column;
+      gap: 0.6rem;
+    }
+
+    .mute-button {
+      min-width: auto;
+      width: 100%;
+      padding: 0.7rem;
+    }
   }
   
   @media (max-width: 480px) {
+    .night-actions-wrapper {
+      padding-top: 2vh;
+    }
+
     .night-actions-container {
       width: 92%;
       padding: 1rem;
+    }
+
+    .night-actions-container.mutilator-active {
+      padding: 0.8rem;
+      gap: 0.8rem;
+      max-height: 95vh;
     }
   
     .night-text {
@@ -161,5 +358,27 @@
     .target-box {
       font-size: 0.9rem;
       padding: 0.6rem 1rem;
+    }
+
+    .mutilator-choice {
+      padding: 0.4rem;
+    }
+
+    .mutilator-choice p {
+      font-size: 0.9rem;
+    }
+
+    .mute-button {
+      font-size: 0.9rem;
+      padding: 0.6rem;
+    }
+
+    .mute-button small {
+      font-size: 0.7rem;
+    }
+
+    .back-button {
+      font-size: 0.8rem;
+      padding: 0.3rem 0.6rem;
     }
   }
