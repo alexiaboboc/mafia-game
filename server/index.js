@@ -21,9 +21,18 @@ const io = new Server(server, {
     methods: ['GET', 'POST'],
     credentials: true
   },
-  transports: ['websocket', 'polling']
+  transports: ['websocket', 'polling'],
+  pingTimeout: 60000,
+  pingInterval: 25000,
+  connectTimeout: 45000,
+  allowUpgrades: true,
+  path: '/socket.io/',
+  serveClient: false
 })
 const PORT = 5001
+
+// Keep track of connected clients to prevent duplicates
+const connectedClients = new Map();
 
 // ------------------ MIDDLEWARE ------------------
 app.use(cors({ origin: 'http://localhost:3000', credentials: true }))
@@ -209,8 +218,23 @@ app.post('/api/game/start', async (req, res) => {
     lobby.gameStarted = true;
     await lobby.save();
 
-    // Emit game started event to all players
-    io.in(code).emit('game-started');
+    // Get all roles in the game in order to start night flow
+    const rolesInGame = roleOrder.filter(r => 
+      players.some(p => p.role === r)
+    );
+    
+    if (rolesInGame.length > 0) {
+      // Start with the first role
+      const firstRole = rolesInGame[0];
+      console.log('Setting initial role for night phase:', firstRole);
+      
+      // Store the current role in the game state
+      newGame.currentRole = firstRole;
+      await newGame.save();
+
+      // Emit game started event to all players
+      io.in(code).emit('game-started', { code });
+    }
 
     res.json({ message: "Game started", players });
   } catch (err) {
@@ -357,88 +381,160 @@ app.get('/api/lobby/:code/status', async (req, res) => {
 
 // ------------------ SOCKET.IO ------------------
 io.on('connection', socket => {
-  console.log('Client connected:', socket.id);
+  const clientId = socket.id;
+  
+  // Check if this client is already connected
+  if (connectedClients.has(clientId)) {
+    console.log('Duplicate connection attempt from client:', clientId);
+    socket.disconnect(true);
+    return;
+  }
+
+  console.log('Client connected:', clientId);
+  connectedClients.set(clientId, {
+    connectedAt: Date.now(),
+    rooms: new Set()
+  });
 
   socket.on('join-lobby', ({ code, username, id }) => {
+    // Check if user is already in this lobby
+    const client = connectedClients.get(clientId);
+    if (client && client.rooms.has(code)) {
+      console.log(`User ${username} already in lobby ${code}`);
+      return;
+    }
+
     console.log(`User ${username} joined lobby ${code}`);
     socket.join(code);
+    if (client) {
+      client.rooms.add(code);
+    }
     io.in(code).emit('user-joined', { username });
   });
 
   socket.on('leave-lobby', ({ code, username, id }) => {
     console.log(`User ${username} left lobby ${code}`);
     socket.leave(code);
+    const client = connectedClients.get(clientId);
+    if (client) {
+      client.rooms.delete(code);
+    }
     io.in(code).emit('user-left', { username });
   });
 
-  socket.on('game-started', ({ code }) => {
-    console.log(`Game started in lobby ${code}`);
-    io.in(code).emit('game-started');
-  });
+  socket.on('join-night-actions', async ({ code }) => {
+    try {
+      console.log('Client joining night actions for code:', code);
+      const game = await Game.findOne({ code });
+      if (!game) {
+        console.log('Game not found for code:', code);
+        return;
+      }
 
-  // New socket events for night actions
-  socket.on('night-action-started', ({ code, role }) => {
-    console.log(`Night action started for role ${role} in lobby ${code}`);
-    // Broadcast to all clients in the lobby
-    io.in(code).emit('night-action-started', { role });
+      // Get all roles in the game in order
+      const rolesInGame = roleOrder.filter(r => 
+        game.players.some(p => p.role === r)
+      );
+
+      if (rolesInGame.length === 0) {
+        console.log('No roles found in game');
+        return;
+      }
+
+      // If we have a current role set, emit it. Otherwise start with the first role.
+      let currentRole = game.currentRole;
+      if (!currentRole) {
+        currentRole = rolesInGame[0];
+        game.currentRole = currentRole;
+        await game.save();
+        console.log('Starting night phase with first role:', currentRole);
+      } else {
+        console.log('Resuming night phase with current role:', currentRole);
+      }
+
+      // Emit the current role's turn to this specific client
+      socket.emit('night-action-started', { role: currentRole });
+      
+      // Also emit to all clients in the room to sync everyone
+      setTimeout(() => {
+        io.in(code).emit('night-action-started', { role: currentRole });
+        console.log('Night action started event emitted for role:', currentRole);
+      }, 500);
+    } catch (error) {
+      console.error('Error joining night actions:', error);
+    }
   });
 
   socket.on('night-action-completed', async ({ code, role, target }) => {
     try {
       console.log('Night action completed:', { code, role, target });
-      const gameState = await getGameState(code);
-      if (!gameState) {
-        console.error('Game state not found for code:', code);
+      const game = await Game.findOne({ code });
+      if (!game) {
+        console.log('Game not found for code:', code);
         return;
       }
 
-      // Get roles in order, filtering out roles that aren't in the game
+      // Get all roles in the game in order
       const rolesInGame = roleOrder.filter(r => 
-        gameState.players.some(p => p.role === r)
+        game.players.some(p => p.role === r)
       );
       console.log('Roles in game:', rolesInGame);
 
       const currentRoleIndex = rolesInGame.indexOf(role);
-      console.log('Current role index:', currentRoleIndex, 'Total roles:', rolesInGame.length);
+      console.log('Current role index:', currentRoleIndex);
 
-      // Broadcast completion of current role's action
-      console.log('Broadcasting night-action-completed event');
-      io.to(code).emit('night-action-completed', { role, target });
+      // Broadcast completion to all clients
+      console.log('Broadcasting completion to all clients');
+      io.in(code).emit('night-action-completed', { role, target });
+      console.log('Completion broadcast complete');
 
-      // If this was the last role, end the night
-      if (currentRoleIndex === rolesInGame.length - 1) {
-        console.log('Last role completed, ending night phase');
-        setTimeout(async () => {
-          try {
-            const result = await resolveNightPhase(code);
-            console.log('Night phase resolved:', result);
-            io.to(code).emit('night-ended', result);
-          } catch (error) {
-            console.error('Failed to resolve night phase:', error);
-            io.to(code).emit('night-ended', { error: 'Failed to resolve night phase' });
-          }
-        }, 3000);
-        return;
+      // Proceed to next role after a delay
+      if (currentRoleIndex < rolesInGame.length - 1) {
+        const nextRole = rolesInGame[currentRoleIndex + 1];
+        console.log('Will start next role:', nextRole, 'in 3 seconds');
+        
+        // Store the next role in the game state
+        game.currentRole = nextRole;
+        await game.save();
+        
+        // Wait for 3 seconds before starting next role
+        await new Promise(resolve => setTimeout(resolve, 3000));
+        
+        console.log('Starting next role:', nextRole);
+        // Re-emit to all clients in case some reconnected
+        io.in(code).emit('night-action-started', { role: nextRole });
+        console.log('Next role event emitted');
+      } else {
+        console.log('All roles completed, will end night phase in 3 seconds');
+        // Wait for 3 seconds before ending night
+        await new Promise(resolve => setTimeout(resolve, 3000));
+        
+        try {
+          console.log('Resolving night phase');
+          const result = await resolveNightPhase(code);
+          console.log('Night phase resolved, broadcasting end');
+          io.in(code).emit('night-ended', result);
+          console.log('Night end broadcast complete');
+        } catch (error) {
+          console.error('Error resolving night phase:', error);
+          io.in(code).emit('night-ended', { error: 'Failed to resolve night phase' });
+        }
       }
-
-      // Move to next role
-      const nextRole = rolesInGame[currentRoleIndex + 1];
-      console.log('Moving to next role:', nextRole);
-
-      // Wait a bit before starting next role to ensure all clients have processed the completion
-      setTimeout(() => {
-        console.log('Broadcasting night-action-started event for role:', nextRole);
-        io.to(code).emit('night-action-started', { role: nextRole });
-      }, 3000);
-
     } catch (error) {
-      console.error('Error in night-action-completed:', error);
-      io.to(code).emit('night-ended', { error: 'Failed to process night action' });
+      console.error('Error handling night action:', error);
     }
   });
 
   socket.on('disconnect', () => {
-    console.log('Client disconnected:', socket.id);
+    console.log('Client disconnected:', clientId);
+    const client = connectedClients.get(clientId);
+    if (client) {
+      // Clean up rooms
+      client.rooms.forEach(room => {
+        io.in(room).emit('user-left', { username: 'A player' });
+      });
+      connectedClients.delete(clientId);
+    }
   });
 });
 
@@ -446,4 +542,3 @@ io.on('connection', socket => {
 server.listen(PORT, () => {
   console.log(`Server with Socket.IO running on http://localhost:${PORT}`)
 })
-

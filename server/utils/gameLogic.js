@@ -102,8 +102,19 @@ export async function resolveNightActions(code) {
   game.phase = 'day';
   await game.save();
 
+  // Convert IDs to usernames for client response
+  const deadPlayers = [...deaths]
+    .filter(id => !heals.has(id))
+    .map(id => playersMap[id]?.username)
+    .filter(Boolean);
+
+  const mutedPlayers = Array.from(mutes.entries())
+    .map(([id, type]) => playersMap[id]?.username)
+    .filter(Boolean);
+
   return {
-    deaths: [...deaths].filter(id => !heals.has(id)),
-    mutes: Object.fromEntries(mutes),
+    deaths: deadPlayers,
+    muted: mutedPlayers,
+    wills: [] // Add support for wills if needed later
   };
 }

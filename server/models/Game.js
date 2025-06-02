@@ -14,6 +14,7 @@ const GameSchema = new mongoose.Schema({
   code: String,
   round: { type: Number, default: 1 },
   phase: { type: String, default: 'night' },
+  currentRole: { type: String, default: null },
   players: [PlayerSchema],
   history: [
     {
