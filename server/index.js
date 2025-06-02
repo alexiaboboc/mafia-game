@@ -49,8 +49,8 @@ mongoose.connect('mongodb://127.0.0.1:27017/mafia', {
 // Define the exact order of roles for night actions
 const roleOrder = [
   "queen",
+  "mutilator", 
   "killer",
-  "mutilator",
   "doctor",
   "serial-killer",
   "sacrifice",
@@ -185,13 +185,13 @@ app.post('/api/game/start', async (req, res) => {
     const count = users.length;
 
     const rolePresets = {
-      5: ["queen", "killer", "mutilator", "doctor", "policeman"],
-      6: ["queen", "killer", "mutilator", "doctor", "policeman", "citizen"],
-      7: ["queen", "killer", "mutilator", "doctor", "policeman", "citizen", "sacrifice"],
-      8: ["queen", "killer", "mutilator", "doctor", "policeman", "citizen", "sacrifice", "serial-killer"],
-      9: ["queen", "killer", "mutilator", "doctor", "policeman", "citizen", "sacrifice", "serial-killer", "sheriff"],
-      10: ["queen", "killer", "mutilator", "doctor", "policeman", "citizen", "sacrifice", "serial-killer", "sheriff", "mayor"],
-      11: ["queen", "killer", "mutilator", "doctor", "policeman", "citizen", "sacrifice", "serial-killer", "sheriff", "mayor", "lookout"]
+      5: ["queen", "doctor", "killer", "mutilator", "policeman"],
+      6: ["queen", "doctor", "killer", "mutilator", "policeman", "citizen"],
+      7: ["queen", "doctor", "killer", "mutilator", "policeman", "citizen", "sacrifice"],
+      8: ["queen", "doctor", "killer", "mutilator", "policeman", "citizen", "sacrifice", "serial-killer"],
+      9: ["queen", "doctor", "killer", "mutilator", "policeman", "citizen", "sacrifice", "serial-killer", "sheriff"],
+      10: ["queen", "doctor", "killer", "mutilator", "policeman", "citizen", "sacrifice", "serial-killer", "sheriff", "mayor"],
+      11: ["queen", "doctor", "killer", "mutilator", "policeman", "citizen", "sacrifice", "serial-killer", "sheriff", "mayor", "lookout"]
     };
 
     const roles = rolePresets[count];
@@ -219,9 +219,14 @@ app.post('/api/game/start', async (req, res) => {
     await lobby.save();
 
     // Get all roles in the game in order to start night flow
-    const rolesInGame = roleOrder.filter(r => 
-      players.some(p => p.role === r)
-    );
+    const actualGameRoles = players.map(p => p.role);
+    
+    // Filter roleOrder to only include roles that are actually in this game
+    const rolesInGame = roleOrder.filter(r => actualGameRoles.includes(r));
+    
+    console.log('Game started with', count, 'players');
+    console.log('Roles assigned:', actualGameRoles);
+    console.log('Night order will be:', rolesInGame);
     
     if (rolesInGame.length > 0) {
       // Start with the first role
@@ -431,19 +436,23 @@ io.on('connection', socket => {
         return;
       }
 
-      // Get all roles in the game in order
-      const rolesInGame = roleOrder.filter(r => 
-        game.players.some(p => p.role === r)
-      );
+      // Get actual roles in the game, not from roleOrder
+      const actualGameRoles = game.players.map(p => p.role);
+      
+      // Filter roleOrder to only include roles that are actually in this game
+      const rolesInGame = roleOrder.filter(r => actualGameRoles.includes(r));
 
       if (rolesInGame.length === 0) {
         console.log('No roles found in game');
         return;
       }
 
+      console.log('Actual roles in game:', actualGameRoles);
+      console.log('Ordered roles for night:', rolesInGame);
+
       // If we have a current role set, emit it. Otherwise start with the first role.
       let currentRole = game.currentRole;
-      if (!currentRole) {
+      if (!currentRole || !actualGameRoles.includes(currentRole)) {
         currentRole = rolesInGame[0];
         game.currentRole = currentRole;
         await game.save();
@@ -474,11 +483,14 @@ io.on('connection', socket => {
         return;
       }
 
-      // Get all roles in the game in order
-      const rolesInGame = roleOrder.filter(r => 
-        game.players.some(p => p.role === r)
-      );
-      console.log('Roles in game:', rolesInGame);
+      // Get actual roles in the game, not from roleOrder
+      const actualGameRoles = game.players.map(p => p.role);
+      
+      // Filter roleOrder to only include roles that are actually in this game
+      const rolesInGame = roleOrder.filter(r => actualGameRoles.includes(r));
+      
+      console.log('Actual roles in game:', actualGameRoles);
+      console.log('Ordered roles for night:', rolesInGame);
 
       const currentRoleIndex = rolesInGame.indexOf(role);
       console.log('Current role index:', currentRoleIndex);
