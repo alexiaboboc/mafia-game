@@ -3,17 +3,33 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { io } from "socket.io-client";
 import "../styles/NightActions.css";
 
+// Create socket instance outside component to prevent multiple connections
 const socket = io("http://localhost:5001", {
   reconnection: true,
   reconnectionAttempts: 5,
   reconnectionDelay: 1000,
   transports: ['websocket', 'polling'],
-  withCredentials: true
+  withCredentials: true,
+  forceNew: false,
+  multiplex: false,
+  path: '/socket.io/',
+  autoConnect: true,
+  upgrade: true
 });
 
 // Add socket connection status logging
 socket.on('connect', () => {
   console.log('Socket connected with ID:', socket.id);
+  // Re-join lobby if we have a code
+  const code = sessionStorage.getItem("lobbyCode");
+  if (code) {
+    console.log('Re-joining lobby on connect:', code);
+    socket.emit('join-lobby', { 
+      code, 
+      username: sessionStorage.getItem("username"),
+      id: sessionStorage.getItem("id")
+    });
+  }
 });
 
 socket.on('disconnect', () => {
@@ -22,6 +38,20 @@ socket.on('disconnect', () => {
 
 socket.on('connect_error', (error) => {
   console.error('Socket connection error:', error);
+});
+
+socket.on('reconnect', (attemptNumber) => {
+  console.log('Socket reconnected after', attemptNumber, 'attempts');
+  // Re-join lobby if we have a code
+  const code = sessionStorage.getItem("lobbyCode");
+  if (code) {
+    console.log('Re-joining lobby on reconnect:', code);
+    socket.emit('join-lobby', { 
+      code, 
+      username: sessionStorage.getItem("username"),
+      id: sessionStorage.getItem("id")
+    });
+  }
 });
 
 // Define the exact order of roles for night actions
@@ -58,6 +88,18 @@ const actionRoles = [
   "sacrifice", "policeman", "sheriff", "lookout"
 ];
 
+const actionMap: Record<string, string> = {
+  queen: "block",
+  killer: "kill",
+  mutilator: "mute",
+  policeman: "shoot",
+  doctor: "heal",
+  sheriff: "investigate",
+  lookout: "watch",
+  "serial-killer": "sk-kill",
+  sacrifice: "revenge"
+};
+
 interface Player {
   id: string;
   username: string;
@@ -70,6 +112,7 @@ interface NightResult {
   deaths: string[];
   muted: string[];
   wills: string[];
+  error?: string;
 }
 
 export default function NightActions() {
@@ -78,126 +121,74 @@ export default function NightActions() {
   const playerRole = location.state?.role || null;
   const playerId = sessionStorage.getItem("id");
   const lobbyCode = sessionStorage.getItem("lobbyCode");
+  const username = sessionStorage.getItem("username");
 
   const [players, setPlayers] = useState<Player[]>([]);
-  const [currentIndex, setCurrentIndex] = useState(0);
-  const [phase, setPhase] = useState("narration");
+  const [activeRole, setActiveRole] = useState<string | null>(null);
+  const [actionCompleted, setActionCompleted] = useState<string | null>(null);
   const [nightEnded, setNightEnded] = useState(false);
   const [nightResult, setNightResult] = useState<NightResult>({ deaths: [], muted: [], wills: [] });
-  const [rolesInGame, setRolesInGame] = useState<string[]>([]);
-  const [gameRound, setGameRound] = useState(1);
-  const [currentAction, setCurrentAction] = useState<string | null>(null);
-  const [waitingForAction, setWaitingForAction] = useState(false);
-  const [isInitialized, setIsInitialized] = useState(false);
   const [hasActed, setHasActed] = useState(false);
-  const [activeRole, setActiveRole] = useState<string | null>(null);
+  const [isInitialized, setIsInitialized] = useState(false);
 
-  // Filter roleOrder to only include roles that are present in the game
-  const orderedRolesInGame = roleOrder.filter(role => rolesInGame.includes(role));
-
-  // Initialize game state and socket listeners
+  // Initialize game state
   useEffect(() => {
-    const code = sessionStorage.getItem("lobbyCode");
-    if (!code || isInitialized) return;
+    if (!lobbyCode || isInitialized) return;
 
     console.log('Initializing game state...');
 
-    // Join the lobby room
+    // First, make sure we're in the lobby room
     socket.emit('join-lobby', { 
-      code, 
+      code: lobbyCode, 
       username: sessionStorage.getItem("username"),
       id: sessionStorage.getItem("id")
     });
 
     // Fetch initial game state
-    fetch(`http://localhost:5001/api/game/${code}`)
+    fetch(`http://localhost:5001/api/game/${lobbyCode}`)
       .then(res => res.json())
       .then(data => {
         if (!data.players) return;
         console.log('Game data received:', data);
         setPlayers(data.players);
-        const roles = data.players.map((p: Player) => p.role);
-        console.log('Setting roles in game:', roles);
-        setRolesInGame(roles);
-        setGameRound(data.round || 1);
         setIsInitialized(true);
-
-        // Start with the first role that is present in the game
-        const firstRole = roleOrder.find(role => roles.includes(role));
-        if (firstRole) {
-          console.log('Starting with first role:', firstRole);
-          setActiveRole(firstRole);
-          setPhase("narration");
-          setWaitingForAction(true);
-          setHasActed(false);
-          setCurrentAction(null);
-        }
+        
+        // Request current night state from server
+        console.log('Requesting night state from server...');
+        socket.emit('join-night-actions', { code: lobbyCode });
       })
       .catch(err => {
         console.error("Failed to fetch game data:", err);
       });
+  }, [lobbyCode, isInitialized]);
 
-    socket.on('night-action-started', ({ role }) => {
-      console.log('Night action started event received:', role);
-      console.log('Current state before update:', {
-        activeRole,
-        currentIndex,
-        hasActed,
-        waitingForAction,
-        phase,
-        playerRole
-      });
-      
-      const roleIndex = orderedRolesInGame.indexOf(role);
-      console.log('Role index:', roleIndex, 'Ordered roles:', orderedRolesInGame);
-      
-      if (roleIndex !== -1) {
-        // Reset all states for the new role
-        setCurrentIndex(roleIndex);
-        setActiveRole(role);
-        setPhase("narration");
-        setWaitingForAction(true);
-        setHasActed(false);
-        setCurrentAction(null);
-        
-        console.log('State updated for new role:', {
-          role,
-          roleIndex,
-          playerRole,
-          isPlayerTurn: role === playerRole,
-          isActionRole: actionRoles.includes(role)
-        });
-      }
-    });
+  // Socket event listeners
+  useEffect(() => {
+    if (!lobbyCode) return;
 
-    socket.on('night-action-completed', ({ role, target }) => {
-      console.log('Night action completed event received:', { role, target });
-      console.log('Current state before update:', {
-        activeRole,
-        currentIndex,
-        hasActed,
-        waitingForAction,
-        phase,
-        playerRole
-      });
-      
-      // Update action state
-      setCurrentAction(target);
-      setWaitingForAction(false);
-      setHasActed(true);
-      setPhase("narration");
-      
-      console.log('State updated after action completion:', {
-        role,
-        target,
-        activeRole,
-        playerRole,
-        phase
-      });
-    });
+    const handleGameStarted = ({ code }: { code: string }) => {
+      console.log('Game started event received for code:', code);
+      // Reset states when game starts
+      setActiveRole(null);
+      setActionCompleted(null);
+      setHasActed(false);
+      setNightEnded(false);
+    };
 
-    socket.on('night-ended', (data) => {
-      console.log('Night ended event received:', data);
+    const handleNightActionStarted = ({ role }: { role: string }) => {
+      console.log('Night action started for role:', role);
+      setActiveRole(role);
+      setActionCompleted(null);
+      setHasActed(false);
+    };
+
+    const handleNightActionCompleted = ({ role, target }: { role: string, target: string }) => {
+      console.log('Night action completed:', { role, target });
+      setActionCompleted(target);
+    };
+
+    const handleNightEnded = (data: NightResult) => {
+      console.log('Night ended:', data);
       if (data.error) {
         console.error('Night ended with error:', data.error);
       } else {
@@ -209,71 +200,29 @@ export default function NightActions() {
       }
       setNightEnded(true);
       setTimeout(() => navigate("/chat"), 5000);
-    });
-
-    return () => {
-      socket.off('night-action-started');
-      socket.off('night-action-completed');
-      socket.off('night-ended');
-      socket.off('join-lobby');
     };
-  }, [orderedRolesInGame, currentIndex, isInitialized, activeRole]);
 
-  // Handle role turns
-  useEffect(() => {
-    if (!playerRole || !activeRole || nightEnded || !isInitialized) {
-      console.log('Role turn check skipped:', {
-        playerRole,
-        activeRole,
-        nightEnded,
-        isInitialized
-      });
-      return;
-    }
+    // Register socket event listeners
+    socket.on('game-started', handleGameStarted);
+    socket.on('night-action-started', handleNightActionStarted);
+    socket.on('night-action-completed', handleNightActionCompleted);
+    socket.on('night-ended', handleNightEnded);
 
-    const isPlayerTurn = activeRole === playerRole;
-    const isActionRole = actionRoles.includes(activeRole);
-
-    console.log('Role turn check:', {
-      activeRole,
-      playerRole,
-      isPlayerTurn,
-      isActionRole,
-      hasActed,
-      waitingForAction,
-      currentAction,
-      phase
-    });
-
-    if (isPlayerTurn && isActionRole && !hasActed) {
-      console.log('Setting phase to action for player:', playerRole);
-      setPhase("action");
-    } else {
-      console.log('Setting phase to narration for non-active player');
-      setPhase("narration");
-    }
-  }, [activeRole, playerRole, nightEnded, isInitialized, hasActed, currentAction, waitingForAction]);
+    // Cleanup function
+    return () => {
+      socket.off('game-started', handleGameStarted);
+      socket.off('night-action-started', handleNightActionStarted);
+      socket.off('night-action-completed', handleNightActionCompleted);
+      socket.off('night-ended', handleNightEnded);
+    };
+  }, [lobbyCode, navigate]);
 
   const handleTargetSelect = (targetUsername: string) => {
-    if (hasActed) return; // Prevent multiple actions
+    if (hasActed) return;
     
     console.log('Target selected:', targetUsername);
-    setPhase("narration");
-    setCurrentAction(targetUsername);
     setHasActed(true);
     
-    const actionMap: Record<string, string> = {
-      queen: "block",
-      killer: "kill",
-      mutilator: "mute",
-      policeman: "shoot",
-      doctor: "heal",
-      sheriff: "investigate",
-      lookout: "watch",
-      "serial-killer": "sk-kill",
-      sacrifice: "revenge"
-    };
-
     const action = actionMap[playerRole] || "noop";
 
     fetch("http://localhost:5001/api/game/action", {
@@ -294,7 +243,6 @@ export default function NightActions() {
     })
     .then(() => {
       console.log('Action sent to server, emitting completion');
-      // Emit the completion event
       socket.emit('night-action-completed', { 
         code: lobbyCode, 
         role: playerRole, 
@@ -303,10 +251,7 @@ export default function NightActions() {
     })
     .catch(err => {
       console.error("❌ Failed to send action:", err);
-      // Reset state on error
       setHasActed(false);
-      setCurrentAction(null);
-      setPhase("action");
     });
   };
 
@@ -345,60 +290,65 @@ export default function NightActions() {
     return `☠️ ${deathMessages.join(", ")} died during the night.${mutedMessages}`;
   };
 
-  if (!playerRole) return null;
-
-  const isPlayerTurn = activeRole === playerRole && actionRoles.includes(playerRole);
-  const alivePlayers = players.filter(p => p.alive);
+  // Determine what to show
+  const isMyTurn = activeRole === playerRole && actionRoles.includes(playerRole) && !hasActed;
+  const alivePlayers = players.filter(p => p.alive && p.username !== username);
 
   console.log('Render state:', {
     activeRole,
     playerRole,
-    isPlayerTurn,
-    phase,
-    nightEnded,
+    isMyTurn,
     hasActed,
-    waitingForAction
+    actionCompleted,
+    nightEnded,
+    playersCount: players.length,
+    alivePlayersCount: alivePlayers.length
   });
+
+  if (!playerRole || !isInitialized) {
+    console.log('Not ready to render - missing playerRole or not initialized');
+    return null;
+  }
 
   return (
     <div className="night-actions-wrapper">
       <div className="night-actions-container">
-        {!nightEnded ? (
-          activeRole === playerRole && actionRoles.includes(playerRole) && !hasActed ? (
-            <div className="player-turn-ui fade-in-section">
-              <h2 className="your-turn">Your turn</h2>
-              <div className="card-grid">
-                <img
-                  className="your-role-img"
-                  src={`/cards/${playerRole}.png`}
-                  alt={playerRole.replace("-", " ")}
-                />
-                <div className="target-grid">
-                  {alivePlayers
-                    .filter(p => p.username !== sessionStorage.getItem("username"))
-                    .map((p, i) => (
-                      <div 
-                        className="target-box" 
-                        key={i} 
-                        onClick={() => handleTargetSelect(p.username)}
-                      >
-                        {p.username}
-                      </div>
-                    ))}
-                </div>
-              </div>
-            </div>
-          ) : (
-            <h2 className="night-text fade-in-section">
-              {currentAction ? getActionMessage(activeRole || "", currentAction) : 
-               activeRole ? roleDescriptions[activeRole] : "Night passes quietly..."}
-            </h2>
-          )
-        ) : (
+        {nightEnded ? (
           <div className="night-end-screen fade-in-section">
             <h2>everyone woke up</h2>
             <p>{getNightResultMessage()}</p>
           </div>
+        ) : isMyTurn ? (
+          <div className="player-turn-ui fade-in-section">
+            <h2 className="your-turn">Your turn</h2>
+            <div className="card-grid">
+              <img
+                className="your-role-img"
+                src={`/cards/${playerRole}.png`}
+                alt={playerRole.replace("-", " ")}
+              />
+              <div className="target-grid">
+                {alivePlayers.map((p, i) => (
+                  <div 
+                    className="target-box" 
+                    key={i} 
+                    onClick={() => handleTargetSelect(p.username)}
+                  >
+                    {p.username}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        ) : (
+          <h2 className="night-text fade-in-section">
+            {actionCompleted && activeRole ? 
+              getActionMessage(activeRole, actionCompleted) : 
+              activeRole ? 
+                roleDescriptions[activeRole] : 
+                "Night passes quietly..."
+            }
+          </h2>
         )}
       </div>
     </div>
