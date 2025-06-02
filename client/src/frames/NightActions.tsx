@@ -149,10 +149,24 @@ interface NightResult {
 export default function NightActions() {
   const navigate = useNavigate();
   const location = useLocation();
-  const playerRole = location.state?.role || null;
+  const playerRole = location.state?.role || sessionStorage.getItem("role") || null;
   const playerId = sessionStorage.getItem("id");
   const lobbyCode = sessionStorage.getItem("lobbyCode");
   const username = sessionStorage.getItem("username");
+
+  // Store role in sessionStorage if we got it from location state
+  useEffect(() => {
+    if (location.state?.role) {
+      sessionStorage.setItem("role", location.state.role);
+    }
+  }, [location.state?.role]);
+
+  // Store round in sessionStorage
+  useEffect(() => {
+    if (location.state?.round) {
+      sessionStorage.setItem("round", location.state.round.toString());
+    }
+  }, [location.state?.round]);
 
   const [players, setPlayers] = useState<Player[]>([]);
   const [activeRole, setActiveRole] = useState<string | null>(null);
@@ -167,14 +181,15 @@ export default function NightActions() {
   const [isInitialized, setIsInitialized] = useState(false);
   const [selectedTarget, setSelectedTarget] = useState<string | null>(null);
   const [muteType, setMuteType] = useState<"chat" | "vote" | null>(null);
-  const [gameRound, setGameRound] = useState(1);
+  const [gameRound, setGameRound] = useState(parseInt(sessionStorage.getItem("round") || "1"));
   const [rolesInGame, setRolesInGame] = useState<string[]>([]);
+  const [isDead, setIsDead] = useState(false);
 
   // Initialize game state
   useEffect(() => {
     if (!lobbyCode || isInitialized) return;
 
-    console.log('Initializing game state...');
+    console.log('Initializing game state...', { playerRole, gameRound });
 
     // Prevent browser back navigation
     const preventBack = (e: PopStateEvent) => {
@@ -203,11 +218,22 @@ export default function NightActions() {
         console.log('Game data received:', data);
         setPlayers(data.players);
         setGameRound(data.round || 1);
+        sessionStorage.setItem("round", (data.round || 1).toString());
         
         // Extract roles that are actually in this game
         const gameRoles = data.players.map((p: Player) => p.role);
         setRolesInGame(gameRoles);
         console.log('Roles in this game:', gameRoles);
+        
+        // Check if current player is dead
+        const currentPlayer = data.players.find((p: Player) => p.id === playerId);
+        if (currentPlayer) {
+          setIsDead(!currentPlayer.alive);
+          if (!playerRole) {
+            sessionStorage.setItem("role", currentPlayer.role);
+            window.location.reload(); // Reload to get the role
+          }
+        }
         
         setIsInitialized(true);
         
@@ -223,7 +249,7 @@ export default function NightActions() {
     return () => {
       window.removeEventListener('popstate', preventBack);
     };
-  }, [lobbyCode, isInitialized]);
+  }, [lobbyCode, isInitialized, playerRole, playerId]);
 
   // Socket event listeners
   useEffect(() => {
@@ -242,8 +268,13 @@ export default function NightActions() {
       }, 1000);
     };
 
-    const handleNightActionStarted = ({ role }: { role: string }) => {
-      console.log('Night action started for role:', role);
+    const handleNightActionStarted = ({ role, isDead, isPromoted, narration }: { 
+      role: string, 
+      isDead?: boolean,
+      isPromoted?: boolean,
+      narration?: string 
+    }) => {
+      console.log('Night action started for role:', role, { isDead, isPromoted, narration });
       
       // Validate that this role is actually in the game
       if (!rolesInGame.includes(role)) {
@@ -256,6 +287,22 @@ export default function NightActions() {
       setActiveRole(role);
       setActionCompleted(null);
       setHasActed(false);
+
+      // If this is a dead player's turn, show narration
+      if (isDead && narration) {
+        setActionCompleted('dead');
+        setTimeout(() => {
+          setActionCompleted(null);
+        }, 5000);
+      }
+
+      // If this is a mutilator promotion, show narration
+      if (isPromoted && narration) {
+        setActionCompleted('promoted');
+        setTimeout(() => {
+          setActionCompleted(null);
+        }, 5000);
+      }
     };
 
     const handleNightActionCompleted = ({ role, target }: { role: string, target: string }) => {
@@ -277,6 +324,16 @@ export default function NightActions() {
         });
       }
       setNightEnded(true);
+      
+      // Check if current player is dead
+      const currentPlayer = players.find(p => p.id === playerId);
+      if (currentPlayer && !currentPlayer.alive) {
+        // If player is dead, redirect to main menu after showing results
+        setTimeout(() => {
+          navigate("/");
+        }, 5000);
+        return;
+      }
       
       // Pass night result data to Chat component
       setTimeout(() => {
@@ -307,7 +364,7 @@ export default function NightActions() {
       socket.off('night-action-completed', handleNightActionCompleted);
       socket.off('night-ended', handleNightEnded);
     };
-  }, [lobbyCode, navigate, rolesInGame]);
+  }, [lobbyCode, navigate, rolesInGame, players, playerId]);
 
   const handleTargetSelect = (targetUsername: string) => {
     if (hasActed) return;
@@ -475,6 +532,22 @@ export default function NightActions() {
       return `${role === "sacrifice" ? "The sacrifice" : role === "mayor" ? "The mayor" : "The citizen"} rests quietly through the night.`;
     }
     
+    if (target === "dead") {
+      const deadPlayer = players.find(p => p.role === role);
+      if (deadPlayer) {
+        return `${deadPlayer.username} (${role}) is no longer with us...`;
+      }
+      return `${role} is no longer with us...`;
+    }
+
+    if (target === "promoted") {
+      const promotedPlayer = players.find(p => p.role === "killer");
+      if (promotedPlayer) {
+        return `${promotedPlayer.username} has been promoted to Killer!`;
+      }
+      return `${role} has been promoted to Killer!`;
+    }
+    
     const messages: Record<string, string> = {
       queen: "The queen has made their choice and nullified someone's power.",
       mutilator: "The mutilator has made their choice and decided how to silence someone.",
@@ -550,14 +623,14 @@ export default function NightActions() {
   };
 
   // Determine what to show
-  const isMyTurn = activeRole === playerRole && actionRoles.includes(playerRole) && !hasActed;
+  const isMyTurn = activeRole === playerRole && actionRoles.includes(playerRole) && !hasActed && !isDead;
   const alivePlayers = players.filter(p => p.alive && p.username !== username);
   
   // Special case: Policeman cannot act in round 1
   const canActuallyAct = playerRole !== "policeman" || gameRound >= 2;
   
   // Additional validation to prevent inconsistent states
-  const shouldShowAction = isMyTurn && canActuallyAct && rolesInGame.includes(playerRole);
+  const shouldShowAction = isMyTurn && canActuallyAct && rolesInGame.includes(playerRole) && !isDead;
   
   // Policeman specific validation - force no action in round 1
   const isPolicemanRound1 = playerRole === "policeman" && gameRound < 2;
@@ -575,12 +648,55 @@ export default function NightActions() {
     canActuallyAct,
     shouldShowAction,
     isPolicemanRound1,
-    rolesInGame
+    rolesInGame,
+    isDead
   });
+
+  // Update roles in game when they change
+  useEffect(() => {
+    if (!lobbyCode) return;
+
+    const handleRoleUpdate = async () => {
+      try {
+        const response = await fetch(`http://localhost:5001/api/game/${lobbyCode}`);
+        const data = await response.json();
+        if (data.players) {
+          const gameRoles = data.players.map((p: Player) => p.role);
+          setRolesInGame(gameRoles);
+        }
+      } catch (error) {
+        console.error('Failed to update roles:', error);
+      }
+    };
+
+    socket.on('role-updated', handleRoleUpdate);
+
+    return () => {
+      socket.off('role-updated', handleRoleUpdate);
+    };
+  }, [lobbyCode]);
 
   if (!playerRole || !isInitialized) {
     console.log('Not ready to render - missing playerRole or not initialized');
-    return null;
+    return (
+      <div className="night-actions-wrapper">
+        <div className="night-actions-container">
+          <h2 className="night-text fade-in-section">Loading game state...</h2>
+        </div>
+      </div>
+    );
+  }
+
+  // If player is dead, show a message and redirect to main menu
+  if (isDead) {
+    return (
+      <div className="night-actions-wrapper">
+        <div className="night-actions-container">
+          <h2 className="night-text fade-in-section">You are no longer in the game.</h2>
+          <p>Redirecting to main menu...</p>
+        </div>
+      </div>
+    );
   }
 
   return (

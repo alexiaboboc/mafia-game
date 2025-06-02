@@ -150,7 +150,7 @@ export default function Lobby() {
 
         <div className="lobby-info">
           <div className="lobby-title">Lobby</div>
-          <div className="player-count">{players.length}/10</div>
+          <div className="player-count">{players.length}/11</div>
         </div>
 
         <div className="players-table">

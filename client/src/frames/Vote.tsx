@@ -169,10 +169,21 @@ export default function VotingFrame() {
       setSelectedPlayer(null);
       setHasVoted(false);
       
+      // Get current role and round from sessionStorage
+      const currentRole = sessionStorage.getItem("role");
+      const currentRound = parseInt(sessionStorage.getItem("round") || "1");
+      
       // Add a small delay before navigating
       setTimeout(() => {
-        console.log('➡️ Navigating to night actions');
-        navigate("/night-actions", { replace: true });
+        console.log('➡️ Navigating to night actions with role:', currentRole, 'round:', currentRound + 1);
+        // Use replace: true to prevent back navigation
+        navigate("/night-actions", { 
+          replace: true,
+          state: {
+            role: currentRole,
+            round: currentRound + 1
+          }
+        });
       }, 2000);
     };
 
@@ -302,6 +313,13 @@ export default function VotingFrame() {
       username: username,
       message: testamentMessage.trim()
     });
+
+    // If this is the eliminated player, redirect to main menu after submitting testament
+    if (isEliminated) {
+      setTimeout(() => {
+        navigate("/");
+      }, 3000);
+    }
   };
 
   const handleTestamentComplete = () => {
@@ -312,6 +330,13 @@ export default function VotingFrame() {
         username: eliminatedPlayer,
         message: null // No testament
       });
+
+      // If this is the eliminated player, redirect to main menu
+      if (isEliminated) {
+        setTimeout(() => {
+          navigate("/");
+        }, 3000);
+      }
     }
   };
 
@@ -331,24 +356,26 @@ export default function VotingFrame() {
 
   // Render different phases
   if (currentPhase === 'voting') {
-  return (
-    <div className="voting-wrapper">
-      <div className="voting-container">
-        <h1 className="voting-title">🗳️ Voting Phase</h1>
+    return (
+      <div className="voting-wrapper">
+        <div className="voting-container">
+          <h1 className="voting-title">🗳️ Voting Phase</h1>
           <div className="vote-timer">Time left: {formatTime(voteTimeLeft)}</div>
           <p className="voting-instruction">
-            {isVoteMuted 
-              ? "You are vote-silenced and cannot participate." 
-              : "Choose someone you suspect. Majority decides the fate."
+            {!isAlive 
+              ? "You are dead and cannot participate in voting." 
+              : isVoteMuted 
+                ? "You are vote-silenced and cannot participate." 
+                : "Choose someone you suspect. Majority decides the fate."
             }
           </p>
 
           {isAlive && !isVoteMuted ? (
             <div className="voting-section">
-        <div className="voting-grid">
+              <div className="voting-grid">
                 {votablePlayers.map((player, i) => (
-            <div
-              key={i}
+                  <div
+                    key={i}
                     className={`vote-box ${selectedPlayer === player.username ? "selected" : ""}`}
                     onClick={() => handleVote(player.username)}
                   >
@@ -420,8 +447,8 @@ export default function VotingFrame() {
                 {Object.entries(voteResult.voteCounts).map(([player, count]) => (
                   <div key={player} className="vote-count">
                     {player}: {count} vote{count !== 1 ? 's' : ''}
-            </div>
-          ))}
+                  </div>
+                ))}
                 <div className="vote-total">
                   Total votes cast: {voteResult.totalVotes}
                 </div>
@@ -518,8 +545,8 @@ export default function VotingFrame() {
               >
                 Return to Main Menu
               </button>
-          </div>
-        )}
+            </div>
+          )}
         </div>
       </div>
     );
