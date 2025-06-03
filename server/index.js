@@ -182,6 +182,23 @@ app.get('/api/lobby/:code', async (req, res) => {
   res.json({ players });
 });
 
+app.post('/api/lobby/leave', async (req, res) => {
+  const { code, id } = req.body;
+  try {
+    const lobby = await Lobby.findOne({ code });
+    if (!lobby) return res.status(404).json({ error: "Lobby not found" });
+
+    // Remove user from lobby
+    lobby.users = lobby.users.filter(user => user.id !== id);
+    await lobby.save();
+
+    res.json({ message: "Left lobby" });
+  } catch (err) {
+    console.error("Failed to leave lobby:", err);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
 app.post('/api/game/start', async (req, res) => {
   const { code } = req.body;
   try {
@@ -512,8 +529,20 @@ io.on('connection', socket => {
     io.in(code).emit('user-joined', { username });
   });
 
-  socket.on('leave-lobby', ({ code, username, id }) => {
+  socket.on('leave-lobby', async ({ code, username, id }) => {
     console.log(`User ${username} left lobby ${code}`);
+    
+    try {
+      // Remove user from lobby in database
+      const lobby = await Lobby.findOne({ code });
+      if (lobby) {
+        lobby.users = lobby.users.filter(user => user.id !== id);
+        await lobby.save();
+      }
+    } catch (err) {
+      console.error("Failed to remove user from lobby:", err);
+    }
+
     socket.leave(code);
     const client = connectedClients.get(clientId);
     if (client) {
@@ -995,14 +1024,27 @@ io.on('connection', socket => {
     }
   });
 
-  socket.on('disconnect', () => {
+  socket.on('disconnect', async () => {
     console.log('Client disconnected:', clientId);
     const client = connectedClients.get(clientId);
     if (client) {
-      // Clean up rooms
-      client.rooms.forEach(room => {
-        io.in(room).emit('user-left', { username: 'A player' });
-      });
+      // Clean up rooms and remove from lobbies
+      for (const room of client.rooms) {
+        try {
+          const lobby = await Lobby.findOne({ code: room });
+          if (lobby) {
+            // Find the user's ID in this lobby
+            const user = lobby.users.find(u => u.id === clientId);
+            if (user) {
+              lobby.users = lobby.users.filter(u => u.id !== clientId);
+              await lobby.save();
+              io.in(room).emit('user-left', { username: user.username });
+            }
+          }
+        } catch (err) {
+          console.error("Failed to clean up lobby on disconnect:", err);
+        }
+      }
       connectedClients.delete(clientId);
     }
   });
