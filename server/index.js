@@ -1376,6 +1376,17 @@ async function endNightPhase(code) {
     // Initialize chat state when night ends
     const game = await Game.findOne({ code });
     if (game) {
+      // Check victory conditions after night actions
+      const gameResult = await checkVictoryConditions(code);
+      
+      if (gameResult.gameOver) {
+        console.log('🎮 Game is over after night phase, emitting game-over event');
+        game.phase = 'game-over';
+        await game.save();
+        io.in(code).emit('game-over', gameResult);
+        return;
+      }
+      
       game.phase = 'day';
       game.chatStartTime = new Date();
       
