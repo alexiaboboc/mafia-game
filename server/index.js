@@ -5,12 +5,17 @@ import cors from 'cors'
 import bcrypt from 'bcrypt'
 import http from 'http'
 import { Server } from 'socket.io'
+import dotenv from 'dotenv'
 
 import User from './models/User.js'
 import Lobby from './models/Lobby.js'
-import Game from './models/Game.js';
+import Game from './models/Game.js'
+import authRoutes from './routes/auth.js'
 
-import { resolveNightActions } from './utils/gameLogic.js';
+import { resolveNightActions } from './utils/gameLogic.js'
+
+// Load environment variables
+dotenv.config()
 
 // ------------------ CONFIG ------------------
 const app = express()
@@ -29,7 +34,7 @@ const io = new Server(server, {
   path: '/socket.io/',
   serveClient: false
 })
-const PORT = 5001
+const PORT = process.env.PORT || 5001
 
 // Keep track of connected clients to prevent duplicates
 const connectedClients = new Map();
@@ -97,6 +102,8 @@ async function resolveNightPhase(code) {
 }
 
 // ------------------ ROUTES ------------------
+app.use('/api', authRoutes)
+
 app.post('/api/register', async (req, res) => {
   const { username, email, password } = req.body
   try {
