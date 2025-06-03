@@ -84,7 +84,19 @@ export default function Lobby() {
 
     // Force disconnect (tab close)
     const handleUnload = () => {
-      socket.emit("leave-lobby", { code: codeFromStorage, username, id });
+      const username = sessionStorage.getItem("username");
+      const id = sessionStorage.getItem("id");
+
+      if (codeFromStorage && username && id) {
+        // Use sendBeacon for more reliable cleanup when closing tab
+        const data = new Blob([JSON.stringify({ code: codeFromStorage, id })], {
+          type: 'application/json'
+        });
+        navigator.sendBeacon("http://localhost:5001/api/lobby/leave", data);
+        
+        // Also try to emit socket event
+        socket.emit("leave-lobby", { code: codeFromStorage, username, id });
+      }
     };
 
     window.addEventListener("beforeunload", handleUnload);
@@ -99,13 +111,31 @@ export default function Lobby() {
     };
   }, []);
 
-  const handleBack = () => {
+  const handleBack = async () => {
     const username = sessionStorage.getItem("username");
     const id = sessionStorage.getItem("id");
 
     if (code && username && id) {
-      socket.emit("leave-lobby", { code, username, id });
-      setTimeout(() => navigate("/menu"), 300);
+      try {
+        // Call the leave API endpoint
+        await fetch("http://localhost:5001/api/lobby/leave", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ code, id })
+        });
+        
+        // Emit socket event
+        socket.emit("leave-lobby", { code, username, id });
+        
+        // Clear lobby code from storage
+        sessionStorage.removeItem("lobbyCode");
+        
+        // Navigate back
+        navigate("/menu");
+      } catch (err) {
+        console.error("Failed to leave lobby:", err);
+        navigate("/menu");
+      }
     } else {
       navigate("/menu");
     }
