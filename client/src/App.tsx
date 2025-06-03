@@ -13,6 +13,7 @@ import GameStart from "./frames/GameStart";
 import NightActions from "./frames/NightActions";
 import Chat from "./frames/Chat";
 import Vote from "./frames/Vote";
+import PasswordResetForm from './components/PasswordResetForm';
 
 function App() {
   return (
@@ -30,6 +31,7 @@ function App() {
         <Route path="/night-actions" element={<PrivateRoute><NightActions /></PrivateRoute>} />
         <Route path="/chat" element={<PrivateRoute><Chat /></PrivateRoute>} />
         <Route path="/vote" element={<PrivateRoute><Vote /></PrivateRoute>} />
+        <Route path="/reset-password" element={<PasswordResetForm />} />
       </Routes>
     </Router>
   );

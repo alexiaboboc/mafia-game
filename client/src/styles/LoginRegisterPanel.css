@@ -278,3 +278,71 @@
     height: calc(100% - 6px);
   }
 }
+
+.forgot-password {
+  text-align: right;
+}
+
+.forgot-password-link {
+  background: none;
+  border: none;
+  color: white;
+  font-size: 0.85em;
+  cursor: pointer;
+  padding: 5px 10px;
+  text-decoration: none;
+  transition: all 0.3s ease;
+  border-radius: 8px;
+  background: rgba(225, 115, 166, 0.884);
+  box-shadow: inset 0px 4px 4px rgba(255, 255, 255, 0.13);
+}
+
+.forgot-password-link:hover {
+  background: rgb(254, 118, 182);
+
+}
+
+.notification {
+  position: fixed;
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  background-color: #4CAF50;
+  color: white;
+  padding: 15px 25px;
+  border-radius: 5px;
+  box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+  z-index: 1000;
+  animation: slideDown 0.3s ease-out;
+}
+
+@keyframes slideDown {
+  from {
+    transform: translate(-50%, -100%);
+    opacity: 0;
+  }
+  to {
+    transform: translate(-50%, 0);
+    opacity: 1;
+  }
+}
+
+.error-message {
+  color: #ff4444;
+  background: rgba(255, 68, 68, 0.1);
+  padding: 10px;
+  border-radius: 8px;
+  font-size: 0.85em;
+  text-align: center;
+  margin: 5px 0;
+}
+
+.success-message {
+  color: #4CAF50;
+  background: rgba(76, 175, 80, 0.1);
+  padding: 10px;
+  border-radius: 8px;
+  font-size: 0.85em;
+  text-align: center;
+  margin: 5px 0;
+}

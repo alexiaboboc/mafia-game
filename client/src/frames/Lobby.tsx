@@ -18,6 +18,17 @@ export default function Lobby() {
   const [isHost, setIsHost] = useState(false);
   const [showWarning, setShowWarning] = useState(false);
 
+  const refreshLobby = async (lobbyCode: string) => {
+    try {
+      const response = await fetch(`http://localhost:5001/api/lobby/${lobbyCode}`);
+      const data = await response.json();
+      setPlayers(data.players || []);
+      setIsHost(data.players?.[0] === sessionStorage.getItem("username"));
+    } catch (err) {
+      console.error("Failed to refresh lobby:", err);
+    }
+  };
+
   useEffect(() => {
     const codeFromStorage = sessionStorage.getItem("lobbyCode");
     const username = sessionStorage.getItem("username");
@@ -27,46 +38,37 @@ export default function Lobby() {
 
     setCode(codeFromStorage);
 
-    // 1. Fetch existing players and check if current user is host
-    fetch(`http://localhost:5001/api/lobby/${codeFromStorage}`)
-      .then(res => res.json())
-      .then(data => {
-        setPlayers(data.players || []);
-        // First player in the list is the host
-        setIsHost(data.players?.[0] === username);
-      })
-      .catch(err => console.error("Failed to load players", err));
+    // Initial lobby load
+    refreshLobby(codeFromStorage);
 
-    // 2. Send join event with id included
+    // Join lobby
     socket.emit("join-lobby", { code: codeFromStorage, username, id });
     console.log(`Joined lobby ${codeFromStorage} as ${username}`);
 
-    // 3. Listen for new players
+    // Set up periodic refresh
+    const refreshInterval = setInterval(() => {
+      refreshLobby(codeFromStorage);
+    }, 2000); // Refresh every 2 seconds
+
+    // Listen for new players
     socket.off("user-joined").on("user-joined", ({ username }) => {
       console.log(`New player joined: ${username}`);
-      setPlayers(prev => prev.includes(username) ? prev : [...prev, username]);
+      refreshLobby(codeFromStorage);
     });
 
-    // 4. Listen for players leaving
+    // Listen for players leaving
     socket.off("user-left").on("user-left", ({ username }) => {
       console.log(`Player left: ${username}`);
-      fetch(`http://localhost:5001/api/lobby/${codeFromStorage}`)
-        .then(res => res.json())
-        .then(data => {
-          setPlayers(data.players || []);
-          // Update host status if needed
-          setIsHost(data.players?.[0] === sessionStorage.getItem("username"));
-        })
-        .catch(err => console.error("Failed to reload players after leave", err));
+      refreshLobby(codeFromStorage);
     });
 
-    // 5. Listen for game start
+    // Listen for game start
     socket.off("game-started").on("game-started", () => {
       console.log("Game started event received, navigating to gamestart");
       navigate("/gamestart");
     });
 
-    // 6. Check game status periodically
+    // Check game status periodically
     const statusInterval = setInterval(() => {
       fetch(`http://localhost:5001/api/lobby/${codeFromStorage}/status`)
         .then(res => res.json())
@@ -80,16 +82,17 @@ export default function Lobby() {
         .catch(err => console.error("Failed to check game status:", err));
     }, 1000);
 
-    // 7. Force disconnect (tab close)
+    // Force disconnect (tab close)
     const handleUnload = () => {
       socket.emit("leave-lobby", { code: codeFromStorage, username, id });
     };
 
     window.addEventListener("beforeunload", handleUnload);
 
-    // 8. Cleanup on component unmount
+    // Cleanup on component unmount
     return () => {
       clearInterval(statusInterval);
+      clearInterval(refreshInterval);
       socket.emit("leave-lobby", { code: codeFromStorage, username, id });
       window.removeEventListener("beforeunload", handleUnload);
       socket.disconnect();
