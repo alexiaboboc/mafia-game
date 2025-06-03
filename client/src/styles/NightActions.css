@@ -382,3 +382,56 @@
       padding: 0.3rem 0.6rem;
     }
   }
+
+.game-over-screen {
+  text-align: center;
+  padding: 2rem;
+  background: rgba(0, 0, 0, 0.8);
+  border-radius: 10px;
+  max-width: 600px;
+  margin: 0 auto;
+}
+
+.game-over-screen h2 {
+  font-size: 2.5rem;
+  color: #ff4444;
+  margin-bottom: 1.5rem;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+}
+
+.victory-message {
+  font-size: 1.5rem;
+  color: #fff;
+  margin-bottom: 2rem;
+  line-height: 1.4;
+}
+
+.survivors {
+  background: rgba(255, 255, 255, 0.1);
+  padding: 1.5rem;
+  border-radius: 8px;
+  margin-top: 2rem;
+}
+
+.survivors h3 {
+  color: #fff;
+  font-size: 1.2rem;
+  margin-bottom: 1rem;
+}
+
+.survivors ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.survivors li {
+  color: #ddd;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.survivors li:last-child {
+  border-bottom: none;
+}

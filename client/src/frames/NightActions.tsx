@@ -144,12 +144,16 @@ interface NightResult {
   investigations?: Record<string, string>;
   lookoutResults?: Record<string, string[]>;
   error?: string;
+  gameOver?: boolean;
+  gameOverMessage?: string;
+  winner?: string;
+  alivePlayers?: any[];
 }
 
 export default function NightActions() {
   const navigate = useNavigate();
   const location = useLocation();
-  const playerRole = location.state?.role || sessionStorage.getItem("role") || null;
+  const [currentRole, setCurrentRole] = useState(location.state?.role || sessionStorage.getItem("role") || null);
   const playerId = sessionStorage.getItem("id");
   const lobbyCode = sessionStorage.getItem("lobbyCode");
   const username = sessionStorage.getItem("username");
@@ -158,6 +162,7 @@ export default function NightActions() {
   useEffect(() => {
     if (location.state?.role) {
       sessionStorage.setItem("role", location.state.role);
+      setCurrentRole(location.state.role);
     }
   }, [location.state?.role]);
 
@@ -167,6 +172,24 @@ export default function NightActions() {
       sessionStorage.setItem("round", location.state.round.toString());
     }
   }, [location.state?.round]);
+
+  // Update role when promotion happens
+  useEffect(() => {
+    const handleRoleUpdate = () => {
+      const newRole = sessionStorage.getItem("role");
+      if (newRole && newRole !== currentRole) {
+        console.log('Role updated from', currentRole, 'to', newRole);
+        setCurrentRole(newRole);
+      }
+    };
+
+    // Listen for storage events (in case role is updated in another tab)
+    window.addEventListener('storage', handleRoleUpdate);
+    
+    return () => {
+      window.removeEventListener('storage', handleRoleUpdate);
+    };
+  }, [currentRole]);
 
   const [players, setPlayers] = useState<Player[]>([]);
   const [activeRole, setActiveRole] = useState<string | null>(null);
@@ -189,7 +212,7 @@ export default function NightActions() {
   useEffect(() => {
     if (!lobbyCode || isInitialized) return;
 
-    console.log('Initializing game state...', { playerRole, gameRound });
+    console.log('Initializing game state...', { currentRole, gameRound });
 
     // Prevent browser back navigation
     const preventBack = (e: PopStateEvent) => {
@@ -229,7 +252,7 @@ export default function NightActions() {
         const currentPlayer = data.players.find((p: Player) => p.id === playerId);
         if (currentPlayer) {
           setIsDead(!currentPlayer.alive);
-          if (!playerRole) {
+          if (!currentRole) {
             sessionStorage.setItem("role", currentPlayer.role);
             window.location.reload(); // Reload to get the role
           }
@@ -249,7 +272,7 @@ export default function NightActions() {
     return () => {
       window.removeEventListener('popstate', preventBack);
     };
-  }, [lobbyCode, isInitialized, playerRole, playerId]);
+  }, [lobbyCode, isInitialized, currentRole, playerId]);
 
   // Socket event listeners
   useEffect(() => {
@@ -274,7 +297,7 @@ export default function NightActions() {
       isPromoted?: boolean,
       narration?: string 
     }) => {
-      console.log('Night action started for role:', role, { isDead, isPromoted, narration });
+      console.log('Night action started event received:', { role, isDead, isPromoted, narration });
       
       // Validate that this role is actually in the game
       if (!rolesInGame.includes(role)) {
@@ -288,20 +311,43 @@ export default function NightActions() {
       setActionCompleted(null);
       setHasActed(false);
 
-      // If this is a dead player's turn, show narration
-      if (isDead && narration) {
-        setActionCompleted('dead');
-        setTimeout(() => {
-          setActionCompleted(null);
-        }, 5000);
+      // Check if killer is dead and current player is mutilator
+      const isKillerDead = !players.find(p => p.role === "killer" && p.alive);
+      const isCurrentPlayerMutilator = sessionStorage.getItem("role") === "mutilator";
+      
+      if (isKillerDead && isCurrentPlayerMutilator) {
+        console.log('Killer is dead and current player is mutilator - promoting to killer');
+        sessionStorage.setItem("role", "killer");
+        window.location.reload();
+        return;
       }
 
-      // If this is a mutilator promotion, show narration
-      if (isPromoted && narration) {
-        setActionCompleted('promoted');
+      // If this is a dead player's turn, show their role description and auto-complete after 5 seconds
+      if (isDead) {
+        console.log('Dead player turn:', role);
+        setActionCompleted(role);
         setTimeout(() => {
-          setActionCompleted(null);
+          socket.emit('night-action-completed', { 
+            code: lobbyCode, 
+            role: role, 
+            target: role 
+          });
         }, 5000);
+        return;
+      }
+
+      // If this is mutilator's turn and killer is dead, show mutilator message for 5 seconds then continue
+      if (role === "mutilator" && isKillerDead) {
+        console.log('Showing mutilator message before killer promotion');
+        setActionCompleted("mutilator");
+        setTimeout(() => {
+          socket.emit('night-action-completed', { 
+            code: lobbyCode, 
+            role: "mutilator",
+            target: "mutilator" 
+          });
+        }, 5000);
+        return;
       }
     };
 
@@ -311,7 +357,7 @@ export default function NightActions() {
     };
 
     const handleNightEnded = (data: NightResult) => {
-      console.log('Night ended:', data);
+      console.log('Night ended event received:', data);
       if (data.error) {
         console.error('Night ended with error:', data.error);
       } else {
@@ -351,11 +397,31 @@ export default function NightActions() {
       }, 5000);
     };
 
+    const handleGameOver = (data: { message: string, winner: string, alivePlayers: any[] }) => {
+      console.log('Game over event received:', data);
+      setNightEnded(true);
+      setNightResult({
+        deaths: [],
+        muted: [],
+        wills: { withWills: [], withoutWills: [] },
+        gameOver: true,
+        gameOverMessage: data.message,
+        winner: data.winner,
+        alivePlayers: data.alivePlayers
+      });
+      
+      // Redirect to main menu after showing game over message
+      setTimeout(() => {
+        navigate("/");
+      }, 5000);
+    };
+
     // Register socket event listeners
     socket.on('game-started', handleGameStarted);
     socket.on('night-action-started', handleNightActionStarted);
     socket.on('night-action-completed', handleNightActionCompleted);
     socket.on('night-ended', handleNightEnded);
+    socket.on('game-over', handleGameOver);
 
     // Cleanup function
     return () => {
@@ -363,6 +429,7 @@ export default function NightActions() {
       socket.off('night-action-started', handleNightActionStarted);
       socket.off('night-action-completed', handleNightActionCompleted);
       socket.off('night-ended', handleNightEnded);
+      socket.off('game-over', handleGameOver);
     };
   }, [lobbyCode, navigate, rolesInGame, players, playerId]);
 
@@ -370,13 +437,13 @@ export default function NightActions() {
     if (hasActed) return;
     
     // Additional safety check for policeman in round 1
-    if (playerRole === "policeman" && gameRound < 2 && targetUsername !== "no-action") {
+    if (currentRole === "policeman" && gameRound < 2 && targetUsername !== "no-action") {
       console.warn('Policeman attempted action in round 1, blocking');
       return;
     }
     
     // Validate that the current role is actually in the game
-    if (!rolesInGame.includes(playerRole)) {
+    if (!rolesInGame.includes(currentRole)) {
       console.warn('Player role not in current game, forcing reload');
       window.location.reload();
       return;
@@ -390,14 +457,14 @@ export default function NightActions() {
       console.log('No action role, emitting completion');
       socket.emit('night-action-completed', { 
         code: lobbyCode, 
-        role: playerRole, 
+        role: currentRole, 
         target: "no-action" 
       });
       return;
     }
     
     // Handle doctor self-heal
-    if (targetUsername === "self-heal" && playerRole === "doctor") {
+    if (targetUsername === "self-heal" && currentRole === "doctor") {
       setHasActed(true);
       console.log('Doctor self-healing');
       
@@ -421,7 +488,7 @@ export default function NightActions() {
         console.log('Self-heal sent to server, emitting completion');
         socket.emit('night-action-completed', { 
           code: lobbyCode, 
-          role: playerRole, 
+          role: currentRole, 
           target: "self-heal" 
         });
       })
@@ -433,7 +500,7 @@ export default function NightActions() {
     }
     
     // Handle mutilator - need to choose mute type first
-    if (playerRole === "mutilator") {
+    if (currentRole === "mutilator") {
       setSelectedTarget(targetUsername);
       // Don't set hasActed yet, wait for mute type selection
       return;
@@ -442,7 +509,7 @@ export default function NightActions() {
     // Handle all other action roles
     setHasActed(true);
     
-    const action = actionMap[playerRole] || "noop";
+    const action = actionMap[currentRole] || "noop";
 
     fetch("http://localhost:5001/api/game/action", {
       method: "POST",
@@ -464,7 +531,7 @@ export default function NightActions() {
       console.log('Action sent to server, emitting completion');
       socket.emit('night-action-completed', { 
         code: lobbyCode, 
-        role: playerRole, 
+        role: currentRole, 
         target: targetUsername 
       });
     })
@@ -478,14 +545,14 @@ export default function NightActions() {
     if (!selectedTarget || hasActed) return;
     
     // Validate that the current role is actually in the game
-    if (!rolesInGame.includes(playerRole)) {
+    if (!rolesInGame.includes(currentRole)) {
       console.warn('Player role not in current game, forcing reload');
       window.location.reload();
       return;
     }
     
     // Validate that this is actually the mutilator
-    if (playerRole !== "mutilator") {
+    if (currentRole !== "mutilator") {
       console.warn('Non-mutilator trying to use mutilator action, blocking');
       return;
     }
@@ -515,7 +582,7 @@ export default function NightActions() {
       console.log('Mutilator action sent to server, emitting completion');
       socket.emit('night-action-completed', { 
         code: lobbyCode, 
-        role: playerRole, 
+        role: currentRole, 
         target: selectedTarget 
       });
     })
@@ -531,21 +598,16 @@ export default function NightActions() {
     if (target === "no-action") {
       return `${role === "sacrifice" ? "The sacrifice" : role === "mayor" ? "The mayor" : "The citizen"} rests quietly through the night.`;
     }
-    
-    if (target === "dead") {
-      const deadPlayer = players.find(p => p.role === role);
-      if (deadPlayer) {
-        return `${deadPlayer.username} (${role}) is no longer with us...`;
-      }
-      return `${role} is no longer with us...`;
+
+    // If it's mutilator's turn and killer is dead, show mutilator message
+    const isKillerDead = !players.find(p => p.role === "killer" && p.alive);
+    if (role === "mutilator" && isKillerDead) {
+      return roleDescriptions["mutilator"];
     }
 
-    if (target === "promoted") {
-      const promotedPlayer = players.find(p => p.role === "killer");
-      if (promotedPlayer) {
-        return `${promotedPlayer.username} has been promoted to Killer!`;
-      }
-      return `${role} has been promoted to Killer!`;
+    // Always show the role description from roleDescriptions if available
+    if (roleDescriptions[role]) {
+      return roleDescriptions[role];
     }
     
     const messages: Record<string, string> = {
@@ -565,7 +627,11 @@ export default function NightActions() {
   };
 
   const getNightResultMessage = () => {
-    const { deaths, muted, wills, investigations, lookoutResults } = nightResult;
+    const { deaths, muted, wills, investigations, lookoutResults, gameOver, gameOverMessage } = nightResult;
+    
+    if (gameOver) {
+      return gameOverMessage;
+    }
     
     let message = "";
     
@@ -623,21 +689,21 @@ export default function NightActions() {
   };
 
   // Determine what to show
-  const isMyTurn = activeRole === playerRole && actionRoles.includes(playerRole) && !hasActed && !isDead;
+  const isMyTurn = activeRole === currentRole && actionRoles.includes(currentRole) && !hasActed && !isDead;
   const alivePlayers = players.filter(p => p.alive && p.username !== username);
   
   // Special case: Policeman cannot act in round 1
-  const canActuallyAct = playerRole !== "policeman" || gameRound >= 2;
+  const canActuallyAct = currentRole !== "policeman" || gameRound >= 2;
   
   // Additional validation to prevent inconsistent states
-  const shouldShowAction = isMyTurn && canActuallyAct && rolesInGame.includes(playerRole) && !isDead;
+  const shouldShowAction = isMyTurn && canActuallyAct && rolesInGame.includes(currentRole) && !isDead;
   
   // Policeman specific validation - force no action in round 1
-  const isPolicemanRound1 = playerRole === "policeman" && gameRound < 2;
+  const isPolicemanRound1 = currentRole === "policeman" && gameRound < 2;
 
   console.log('Render state:', {
     activeRole,
-    playerRole,
+    currentRole,
     isMyTurn,
     hasActed,
     actionCompleted,
@@ -676,8 +742,8 @@ export default function NightActions() {
     };
   }, [lobbyCode]);
 
-  if (!playerRole || !isInitialized) {
-    console.log('Not ready to render - missing playerRole or not initialized');
+  if (!currentRole || !isInitialized) {
+    console.log('Not ready to render - missing currentRole or not initialized');
     return (
       <div className="night-actions-wrapper">
         <div className="night-actions-container">
@@ -702,25 +768,44 @@ export default function NightActions() {
   return (
     <div className="night-actions-wrapper">
       <div className={`night-actions-container ${
-        isMyTurn && playerRole === "mutilator" ? "mutilator-active" : ""
+        isMyTurn && currentRole === "mutilator" ? "mutilator-active" : ""
       }`}>
         {nightEnded ? (
           <div className="night-end-screen fade-in-section">
-            <h2>Morning time!</h2>
-            <p>{getNightResultMessage()}</p>
+            {nightResult.gameOver ? (
+              <div className="game-over-screen">
+                <h2>Game Over!</h2>
+                <p className="victory-message">{nightResult.gameOverMessage}</p>
+                <div className="survivors">
+                  <h3>Survivors:</h3>
+                  <ul>
+                    {nightResult.alivePlayers?.map((player: any) => (
+                      <li key={player.username}>
+                        {player.username} ({player.role})
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            ) : (
+              <>
+                <h2>Morning time!</h2>
+                <p>{getNightResultMessage()}</p>
+              </>
+            )}
           </div>
         ) : isMyTurn ? (
           <div className="player-turn-ui fade-in-section">
             <h2 className="your-turn">Your turn</h2>
-            <p className="turn-instruction">{getYourTurnMessage(playerRole, gameRound)}</p>
+            <p className="turn-instruction">{getYourTurnMessage(currentRole, gameRound)}</p>
             <div className="card-grid">
               <img
                 className="your-role-img"
-                src={`/cards/${playerRole}.png`}
-                alt={playerRole.replace("-", " ")}
+                src={`/cards/${currentRole}.png`}
+                alt={currentRole.replace("-", " ")}
               />
               {shouldShowAction && !isPolicemanRound1 ? (
-                playerRole === "mutilator" && selectedTarget ? (
+                currentRole === "mutilator" && selectedTarget ? (
                   <div className="mutilator-choice">
                     <p>You selected: <strong>{selectedTarget}</strong></p>
                     <p>Choose how to silence them:</p>
@@ -749,7 +834,7 @@ export default function NightActions() {
                   </div>
                 ) : (
                   <div className="target-grid">
-                    {playerRole === "doctor" ? (
+                    {currentRole === "doctor" ? (
                       // Special handling for doctor with self-heal option
                       <>
                         {alivePlayers.map((p, i) => (
