@@ -11,6 +11,7 @@ import User from './models/User.js'
 import Lobby from './models/Lobby.js'
 import Game from './models/Game.js'
 import authRoutes from './routes/auth.js'
+import FriendRequest from './models/FriendRequest.js'
 
 import { resolveNightActions } from './utils/gameLogic.js'
 
@@ -36,8 +37,36 @@ const io = new Server(server, {
 })
 const PORT = process.env.PORT || 5001
 
-// Keep track of connected clients to prevent duplicates
+// Keep track of connected clients and their online status
 const connectedClients = new Map();
+const onlineUsers = new Set();
+const userHeartbeats = new Map(); // Track last heartbeat time for each user
+
+// Helper function to check if a user is truly online
+const isUserOnline = (userId) => {
+  if (!userHeartbeats.has(userId)) return false;
+  const lastHeartbeat = userHeartbeats.get(userId);
+  const now = Date.now();
+  // Consider user offline if no heartbeat received in last 45 seconds
+  return (now - lastHeartbeat) <= 45000;
+};
+
+// Cleanup function to remove stale users
+const cleanupStaleUsers = () => {
+  const now = Date.now();
+  for (const [userId, lastHeartbeat] of userHeartbeats.entries()) {
+    if (now - lastHeartbeat > 45000) {
+      // User hasn't sent heartbeat in 45 seconds, consider them offline
+      onlineUsers.delete(userId);
+      userHeartbeats.delete(userId);
+      io.emit('user-status-changed', { userId, status: 'offline' });
+      console.log('User marked offline due to stale heartbeat:', userId);
+    }
+  }
+};
+
+// Run cleanup every 30 seconds
+setInterval(cleanupStaleUsers, 30000);
 
 // ------------------ MIDDLEWARE ------------------
 app.use(cors({ origin: 'http://localhost:3000', credentials: true }))
@@ -158,28 +187,57 @@ app.post('/api/lobby/new', async (req, res) => {
 })
 
 app.post('/api/lobby/join', async (req, res) => {
-  const { code, username, id } = req.body
+  const { code, username, id } = req.body;
 
-  const lobby = await Lobby.findOne({ code })
-  if (!lobby) return res.status(404).json({ error: "Lobby not found" })
+  try {
+    const lobby = await Lobby.findOne({ code });
+    if (!lobby) return res.status(404).json({ error: "Lobby not found" });
 
-  if (lobby.users.find(u => u.id === id)) {
-    return res.status(200).json({ message: "Already in lobby" })
+    // Check if user is already in lobby
+    const existingUserIndex = lobby.users.findIndex(u => u.id === id);
+    if (existingUserIndex !== -1) {
+      // User is already in lobby, just return success without adding again
+      return res.status(200).json({ message: "Already in lobby" });
+    }
+
+    // Add new user to lobby while maintaining order
+    lobby.users.push({ id, username, joinedAt: new Date() });
+    await lobby.save();
+
+    res.json({ message: "Joined lobby" });
+  } catch (err) {
+    console.error("Failed to join lobby:", err);
+    res.status(500).json({ error: "Server error" });
   }
-
-  lobby.users.push({ id, username })
-  await lobby.save()
-
-  res.json({ message: "Joined lobby" })
-})
+});
 
 app.get('/api/lobby/:code', async (req, res) => {
   const { code } = req.params;
-  const lobby = await Lobby.findOne({ code });
-  if (!lobby) return res.status(404).json({ error: 'Lobby not found' });
+  try {
+    const lobby = await Lobby.findOne({ code });
+    if (!lobby) return res.status(404).json({ error: 'Lobby not found' });
 
-  const players = lobby.users.map(u => u.username);
-  res.json({ players });
+    // Ensure unique players sorted by join time
+    const uniquePlayers = Array.from(
+      new Map(lobby.users.map(u => [u.id, u])).values()
+    ).sort((a, b) => {
+      // Sort by joinedAt if available, otherwise maintain current order
+      if (a.joinedAt && b.joinedAt) {
+        return new Date(a.joinedAt).getTime() - new Date(b.joinedAt).getTime();
+      }
+      return 0;
+    });
+
+    const players = uniquePlayers.map(u => ({
+      id: u.id,
+      username: u.username
+    }));
+
+    res.json({ players });
+  } catch (err) {
+    console.error("Failed to get lobby:", err);
+    res.status(500).json({ error: "Server error" });
+  }
 });
 
 app.post('/api/lobby/leave', async (req, res) => {
@@ -496,6 +554,291 @@ app.post('/api/game/:code/chat-state', async (req, res) => {
   }
 });
 
+// Friend request endpoints
+app.post('/api/friends/request', async (req, res) => {
+  const { fromId, fromUsername, toId, toUsername } = req.body;
+  
+  try {
+    // Check if request already exists
+    const existingRequest = await FriendRequest.findOne({
+      from: { id: fromId },
+      to: { id: toId },
+      status: 'pending'
+    });
+
+    if (existingRequest) {
+      return res.status(400).json({ error: "Friend request already sent" });
+    }
+
+    // Create new friend request
+    const friendRequest = new FriendRequest({
+      from: { id: fromId, username: fromUsername },
+      to: { id: toId, username: toUsername }
+    });
+
+    const savedRequest = await friendRequest.save();
+
+    // Emit socket event to notify recipient in their personal room
+    // Include the full request object including the _id
+    io.to(toId).emit('friend-request', {
+      _id: savedRequest._id,
+      from: { id: fromId, username: fromUsername },
+      to: { id: toId, username: toUsername },
+      status: 'pending'
+    });
+
+    console.log(`Emitting friend request to user ${toId} from ${fromUsername}`);
+
+    res.json({ 
+      message: "Friend request sent",
+      request: savedRequest
+    });
+  } catch (err) {
+    console.error("Failed to send friend request:", err);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+app.post('/api/friends/accept', async (req, res) => {
+  const { requestId, fromId, toId } = req.body;
+  console.log('Received accept request:', { requestId, fromId, toId });
+  
+  if (!requestId || !fromId || !toId) {
+    console.log('Missing required fields:', { requestId, fromId, toId });
+    return res.status(400).json({ error: "Missing required fields" });
+  }
+  
+  try {
+    console.log('Looking for friend request with ID:', requestId);
+    const request = await FriendRequest.findById(requestId);
+    
+    if (!request) {
+      console.log('Friend request not found:', requestId);
+      return res.status(404).json({ error: "Friend request not found" });
+    }
+
+    console.log('Found request:', {
+      id: request._id,
+      from: request.from,
+      to: request.to,
+      status: request.status
+    });
+
+    // Check if request is already accepted
+    if (request.status === 'accepted') {
+      console.log('Request already accepted');
+      return res.status(400).json({ error: "Friend request already accepted" });
+    }
+
+    // Verify the request matches the provided IDs
+    if (request.from.id !== fromId || request.to.id !== toId) {
+      console.log('Request IDs do not match:', {
+        requestFrom: request.from.id,
+        requestTo: request.to.id,
+        providedFrom: fromId,
+        providedTo: toId
+      });
+      return res.status(400).json({ error: "Invalid request IDs" });
+    }
+
+    request.status = 'accepted';
+    const savedRequest = await request.save();
+    console.log('Saved accepted request:', {
+      id: savedRequest._id,
+      from: savedRequest.from,
+      to: savedRequest.to,
+      status: savedRequest.status
+    });
+
+    // Emit socket event to notify sender
+    io.to(request.from.id).emit('friend-request-accepted', {
+      by: { id: request.to.id, username: request.to.username }
+    });
+
+    res.json({ 
+      message: "Friend request accepted",
+      request: savedRequest
+    });
+  } catch (err) {
+    console.error("Error accepting friend request:", err);
+    res.status(500).json({ 
+      error: "Failed to accept friend request",
+      details: err.message 
+    });
+  }
+});
+
+app.post('/api/friends/reject', async (req, res) => {
+  const { requestId } = req.body;
+  
+  try {
+    const request = await FriendRequest.findById(requestId);
+    if (!request) {
+      return res.status(404).json({ error: "Friend request not found" });
+    }
+
+    request.status = 'rejected';
+    await request.save();
+
+    // Emit socket event to notify sender
+    io.to(request.from.id).emit('friend-request-rejected', {
+      by: { id: request.to.id, username: request.to.username }
+    });
+
+    res.json({ message: "Friend request rejected" });
+  } catch (err) {
+    console.error("Failed to reject friend request:", err);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+app.get('/api/friends/requests', async (req, res) => {
+  const { userId } = req.query;
+  
+  try {
+    const requests = await FriendRequest.find({
+      'to.id': userId,
+      status: 'pending'
+    });
+
+    res.json({ requests });
+  } catch (err) {
+    console.error("Failed to get friend requests:", err);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+// Temporary debug endpoint
+app.get('/api/debug/friend-requests', async (req, res) => {
+  try {
+    const allRequests = await FriendRequest.find({});
+    console.log('All friend requests in database:', allRequests);
+    res.json({ requests: allRequests });
+  } catch (err) {
+    console.error("Debug endpoint error:", err);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+// Get user's friends - updated with more detailed error handling
+app.get('/api/friends', async (req, res) => {
+  const { userId } = req.query;
+  console.log('Fetching friends for user:', userId);
+  
+  if (!userId) {
+    console.log('No userId provided');
+    return res.status(400).json({ error: "No userId provided" });
+  }
+
+  try {
+    // Get accepted requests for this user
+    const friendRequests = await FriendRequest.find({
+      $or: [
+        { 'from.id': userId, status: 'accepted' },
+        { 'to.id': userId, status: 'accepted' }
+      ]
+    });
+
+    console.log('Friend requests found for user:', {
+      userId,
+      requestsCount: friendRequests.length
+    });
+
+    // Use a Map to ensure unique friends by ID
+    const uniqueFriendsMap = new Map();
+
+    friendRequests.forEach(request => {
+      const isSender = request.from.id === userId;
+      const friendInfo = isSender ? request.to : request.from;
+      
+      // Only add if not already in the map
+      if (!uniqueFriendsMap.has(friendInfo.id)) {
+        uniqueFriendsMap.set(friendInfo.id, {
+          id: friendInfo.id,
+          username: friendInfo.username
+        });
+      }
+    });
+
+    // Convert Map to array
+    const friends = Array.from(uniqueFriendsMap.values());
+
+    console.log('Final friends list (unique):', friends);
+    res.json({ friends });
+  } catch (err) {
+    console.error("Failed to fetch friends:", err);
+    res.status(500).json({ error: "Failed to fetch friends: " + err.message });
+  }
+});
+
+// Get online status for multiple users
+app.get('/api/users/online-status', (req, res) => {
+  const { userIds } = req.query;
+  console.log('Checking online status for users:', userIds);
+
+  if (!userIds) {
+    return res.status(400).json({ error: "No user IDs provided" });
+  }
+
+  try {
+    const userIdArray = userIds.split(',');
+    const statuses = {};
+    
+    userIdArray.forEach(userId => {
+      // Check if user is truly online based on heartbeat
+      statuses[userId] = isUserOnline(userId);
+    });
+
+    console.log('Online statuses:', statuses);
+    res.json({ statuses });
+  } catch (err) {
+    console.error("Failed to get online status:", err);
+    res.status(500).json({ error: "Failed to get online status" });
+  }
+});
+
+// Add endpoint for removing friends
+app.delete('/api/friends/remove', async (req, res) => {
+  try {
+    const { userId, friendId } = req.body;
+    console.log('Removing friendship between:', userId, 'and', friendId);
+    
+    if (!userId || !friendId) {
+      return res.status(400).json({ error: 'Missing userId or friendId' });
+    }
+
+    // Find and update all friend requests between these users
+    const requests = await FriendRequest.find({
+      $or: [
+        { 'from.id': userId, 'to.id': friendId },
+        { 'from.id': friendId, 'to.id': userId }
+      ],
+      status: 'accepted'
+    });
+
+    if (requests.length === 0) {
+      return res.status(404).json({ error: 'Friendship not found' });
+    }
+
+    // Delete the friend requests
+    await FriendRequest.deleteMany({
+      $or: [
+        { 'from.id': userId, 'to.id': friendId },
+        { 'from.id': friendId, 'to.id': userId }
+      ]
+    });
+
+    // Notify both users about the friendship removal
+    io.to(userId).emit('friend-removed', { userId, friendId });
+    io.to(friendId).emit('friend-removed', { userId, friendId });
+    
+    res.json({ message: 'Friend removed successfully' });
+  } catch (error) {
+    console.error('Error removing friend:', error);
+    res.status(500).json({ error: 'Failed to remove friend' });
+  }
+});
+
 // ------------------ SOCKET.IO ------------------
 io.on('connection', socket => {
   const clientId = socket.id;
@@ -511,6 +854,89 @@ io.on('connection', socket => {
   connectedClients.set(clientId, {
     connectedAt: Date.now(),
     rooms: new Set()
+  });
+
+  socket.on('user-connected', ({ userId }) => {
+    console.log('User connected with ID:', userId);
+    
+    // Update client info with userId
+    const client = connectedClients.get(clientId);
+    if (client) {
+      client.userId = userId;
+      connectedClients.set(clientId, client);
+    }
+
+    // Add to online users set and update heartbeat
+    onlineUsers.add(userId);
+    userHeartbeats.set(userId, Date.now());
+    
+    // Broadcast to all clients that this user is now online
+    io.emit('user-status-changed', { userId, status: 'online' });
+    console.log('Broadcasted online status for user:', userId);
+    console.log('Current online users:', Array.from(onlineUsers));
+  });
+
+  socket.on('heartbeat', ({ userId }) => {
+    if (userId) {
+      userHeartbeats.set(userId, Date.now());
+      // If user was previously considered offline, mark them as online
+      if (!onlineUsers.has(userId)) {
+        onlineUsers.add(userId);
+        io.emit('user-status-changed', { userId, status: 'online' });
+      }
+    }
+  });
+
+  socket.on('user-status', ({ userId, status }) => {
+    if (userId) {
+      if (status === 'online' || status === 'away') {
+        onlineUsers.add(userId);
+        userHeartbeats.set(userId, Date.now());
+      } else {
+        onlineUsers.delete(userId);
+        userHeartbeats.delete(userId);
+      }
+      io.emit('user-status-changed', { userId, status });
+    }
+  });
+
+  socket.on('user-disconnected', ({ userId }) => {
+    console.log('User explicitly disconnected:', userId);
+    if (userId) {
+      onlineUsers.delete(userId);
+      userHeartbeats.delete(userId);
+      io.emit('user-status-changed', { userId, status: 'offline' });
+      console.log('User marked as offline:', userId);
+      console.log('Current online users:', Array.from(onlineUsers));
+    }
+  });
+
+  socket.on('disconnect', async () => {
+    console.log('Socket disconnected:', clientId);
+    const client = connectedClients.get(clientId);
+    if (client) {
+      // Don't immediately remove from online users on socket disconnect
+      // Wait for heartbeat timeout instead
+      console.log('Socket disconnected but keeping user online until heartbeat timeout');
+
+      // Clean up rooms and remove from lobbies
+      for (const room of client.rooms) {
+        try {
+          const lobby = await Lobby.findOne({ code: room });
+          if (lobby) {
+            const user = lobby.users.find(u => u.id === client.userId);
+            if (user) {
+              lobby.users = lobby.users.filter(u => u.id !== client.userId);
+              await lobby.save();
+              io.in(room).emit('user-left', { username: user.username });
+            }
+          }
+        } catch (err) {
+          console.error("Failed to clean up lobby on disconnect:", err);
+        }
+      }
+      connectedClients.delete(clientId);
+    }
   });
 
   socket.on('join-lobby', ({ code, username, id }) => {
@@ -693,8 +1119,13 @@ io.on('connection', socket => {
   // Chat message handling
   socket.on('chat-message', ({ code, message }) => {
     console.log('Chat message received:', { code, message });
+    // Add user ID to the message
+    const messageWithId = {
+      ...message,
+      userId: socket.id
+    };
     // Broadcast the message to all players in the room
-    socket.to(code).emit('chat-message', { message });
+    socket.to(code).emit('chat-message', { message: messageWithId });
   });
 
   // Join chat synchronization
@@ -1024,29 +1455,16 @@ io.on('connection', socket => {
     }
   });
 
-  socket.on('disconnect', async () => {
-    console.log('Client disconnected:', clientId);
-    const client = connectedClients.get(clientId);
-    if (client) {
-      // Clean up rooms and remove from lobbies
-      for (const room of client.rooms) {
-        try {
-          const lobby = await Lobby.findOne({ code: room });
-          if (lobby) {
-            // Find the user's ID in this lobby
-            const user = lobby.users.find(u => u.id === clientId);
-            if (user) {
-              lobby.users = lobby.users.filter(u => u.id !== clientId);
-              await lobby.save();
-              io.in(room).emit('user-left', { username: user.username });
-            }
-          }
-        } catch (err) {
-          console.error("Failed to clean up lobby on disconnect:", err);
-        }
-      }
-      connectedClients.delete(clientId);
-    }
+  // Join user's personal room for friend requests
+  socket.on('join-user-room', ({ userId }) => {
+    socket.join(userId);
+    console.log(`User ${userId} joined their personal room`);
+  });
+
+  // Leave user's personal room
+  socket.on('leave-user-room', ({ userId }) => {
+    socket.leave(userId);
+    console.log(`User ${userId} left their personal room`);
   });
 });
 
