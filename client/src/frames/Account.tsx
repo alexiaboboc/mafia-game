@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import "../styles/Account.css";
 import axios from "axios";
+import { disconnectSocket } from "../socket";
 
 export default function Account() {
   const navigate = useNavigate();
@@ -44,6 +45,17 @@ export default function Account() {
     }
   };
 
+  const handleLogout = () => {
+    const userId = sessionStorage.getItem("id");
+    if (userId) {
+      disconnectSocket(userId);
+    }
+    sessionStorage.removeItem("username");
+    sessionStorage.removeItem("email");
+    sessionStorage.removeItem("id");
+    navigate("/");
+  };
+
   return (
     <div className="account-wrapper">
       <img src="/Start.png" alt="Background" className="account-background" />
@@ -68,11 +80,7 @@ export default function Account() {
           </button>
           <button
             className="account-btn"
-            onClick={() => {
-              sessionStorage.removeItem("username");
-              sessionStorage.removeItem("email");
-              navigate("/");
-            }}
+            onClick={handleLogout}
           >
             Log Out
           </button>

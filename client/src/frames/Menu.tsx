@@ -1,35 +1,42 @@
-import { useNavigate } from "react-router-dom";
 import React, { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import "../styles/Menu.css";
+import axios from "axios";
+import { disconnectSocket } from "../socket";
 
 export default function Menu() {
-  const [username, setUsername] = useState<string | null>("");
   const navigate = useNavigate();
+  const [username, setUsername] = useState<string | null>("");
 
   useEffect(() => {
     const storedUsername = sessionStorage.getItem("username");
-    if (storedUsername) {
-      setUsername(storedUsername);
-    }
+    setUsername(storedUsername);
   }, []);
 
   const handleNewGame = async () => {
-    const user = sessionStorage.getItem("username");
-    const id = sessionStorage.getItem("id");
-
-    const response = await fetch("http://localhost:5001/api/lobby/new", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username: user, id }),
-    });
-
-    const data = await response.json();
-    if (response.ok) {
-      sessionStorage.setItem("lobbyCode", data.code); // 🔐 salvăm codul pentru Lobby.tsx
+    try {
+      const username = sessionStorage.getItem("username");
+      const id = sessionStorage.getItem("id");
+      const response = await axios.post("http://localhost:5001/api/lobby/new", {
+        username,
+        id,
+      });
+      console.log("New game response:", response.data);
+      sessionStorage.setItem("lobbyCode", response.data.code);
       navigate("/lobby");
-    } else {
-      alert(data.error || "Could not create lobby");
+    } catch (error) {
+      console.error("Failed to create new game:", error);
+      alert("Failed to create new game");
     }
+  };
+
+  const handleQuit = () => {
+    const userId = sessionStorage.getItem("id");
+    if (userId) {
+      disconnectSocket(userId);
+    }
+    sessionStorage.clear();
+    navigate("/", { replace: true });
   };
 
   return (
@@ -62,13 +69,7 @@ export default function Menu() {
           <button className="menu-button" onClick={() => navigate("/guide")}>
             Guide
           </button>
-          <button
-            className="menu-button"
-            onClick={() => {
-              sessionStorage.clear();
-              navigate("/", { replace: true });
-            }}
-          >
+          <button className="menu-button" onClick={handleQuit}>
             Quit
           </button>
         </div>

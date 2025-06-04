@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { io } from "socket.io-client";
 import "../styles/Chat.css";
+import FriendRequestNotification from "../components/FriendRequestNotification";
 
 // Create socket instance
 const socket = io("http://localhost:5001", {
@@ -19,6 +20,7 @@ interface Message {
   message: string;
   type: 'normal' | 'testament' | 'accusation' | 'defense' | 'system';
   timestamp: Date;
+  userId?: string;
 }
 
 interface Player {
@@ -38,6 +40,19 @@ interface GameState {
   }> | string[];
   investigations?: Record<string, string>;
   lookoutResults?: Record<string, string[]>;
+}
+
+interface FriendRequest {
+  _id: string;
+  from: {
+    id: string;
+    username: string;
+  };
+  to: {
+    id: string;
+    username: string;
+  };
+  status: 'pending' | 'accepted' | 'rejected';
 }
 
 export default function Chat() {
@@ -103,6 +118,12 @@ export default function Chat() {
     const mutedStrings = gameState.muted as string[];
     return mutedStrings.includes(username);
   })();
+
+  // Friend request state
+  const [friendRequests, setFriendRequests] = useState<FriendRequest[]>([]);
+  const [showNotification, setShowNotification] = useState(false);
+  const [currentRequest, setCurrentRequest] = useState<FriendRequest | null>(null);
+  const [friendStatuses, setFriendStatuses] = useState<Record<string, { isFriend: boolean; requestSent: boolean }>>({});
 
   // Update server state helper
   const updateServerState = (state: Partial<{
@@ -373,8 +394,8 @@ export default function Chat() {
         message.type = 'defense';
       }
     }
-
     setMessages(prev => [...prev, message]);
+
     setInput("");
 
     // Emit message to other players
@@ -466,6 +487,385 @@ export default function Chat() {
   const alivePlayers = players.filter(p => p.alive);
   const allVotedToProceed = voteToProceed.size >= alivePlayers.length;
 
+  // Add friend status tracking
+  useEffect(() => {
+    if (!playerId) return;
+
+    // Load persisted sent requests from localStorage
+    const sentRequests = JSON.parse(localStorage.getItem('sentFriendRequests') || '[]');
+    
+    // Function to fetch and update friend statuses
+    const fetchAndUpdateFriendStatuses = async () => {
+      try {
+        console.log('Fetching friends list for user:', playerId);
+        const friendsResponse = await fetch(`http://localhost:5001/api/friends?userId=${playerId}`);
+        const friendsData = await friendsResponse.json();
+        console.log('Received friends data:', friendsData);
+
+        // Create a Set of friend IDs for faster lookup
+        const friendIds = new Set(friendsData.friends.map((f: any) => f.id));
+
+        // Update friend statuses for all messages
+        setFriendStatuses(prev => {
+          const newStatuses = { ...prev };
+          messages.forEach(msg => {
+            if (msg.userId && msg.username !== username) {
+              const isFriend = friendIds.has(msg.userId);
+              newStatuses[msg.userId] = {
+                isFriend: isFriend,
+                requestSent: !isFriend && sentRequests.includes(msg.userId)
+              };
+            }
+          });
+          return newStatuses;
+        });
+      } catch (err) {
+        console.error("Failed to fetch friend statuses:", err);
+      }
+    };
+
+    // Initial fetch
+    fetchAndUpdateFriendStatuses();
+
+    // Set up periodic refresh
+    const refreshInterval = setInterval(fetchAndUpdateFriendStatuses, 5000);
+
+    return () => clearInterval(refreshInterval);
+  }, [playerId, messages, username]);
+
+  // Update messages when they come in to include userId
+  useEffect(() => {
+    socket.off('chat-message').on('chat-message', (data: { message: Message }) => {
+      // Add userId to the message if it's not a system message
+      if (data.message.type !== 'system') {
+        const messageWithId = {
+          ...data.message,
+          userId: players.find(p => p.username === data.message.username)?.id
+        };
+        setMessages(prev => [...prev, messageWithId]);
+      } else {
+        setMessages(prev => [...prev, data.message]);
+      }
+    });
+
+    return () => {
+      socket.off('chat-message');
+    };
+  }, [players]);
+
+  // Update existing messages with userIds when players list changes
+  useEffect(() => {
+    setMessages(prevMessages => 
+      prevMessages.map(msg => {
+        if (msg.type !== 'system' && !msg.userId) {
+          const player = players.find(p => p.username === msg.username);
+          return player ? { ...msg, userId: player.id } : msg;
+        }
+        return msg;
+      })
+    );
+  }, [players]);
+
+  // Socket event listener for friend requests
+  useEffect(() => {
+    if (!playerId) return;
+
+    // Load persisted sent requests from localStorage
+    const sentRequests = JSON.parse(localStorage.getItem('sentFriendRequests') || '[]');
+
+    const handleFriendRequest = (data: { 
+      _id: string;
+      from: { id: string; username: string };
+      to: { id: string; username: string };
+      status: 'pending' | 'accepted' | 'rejected';
+    }) => {
+      console.log('Received friend request in real-time:', data);
+      
+      // Update friend requests list and show notification
+      setFriendRequests(prev => {
+        // Check if we already have this request
+        if (!prev.some(req => req._id === data._id)) {
+          const updatedRequests = [...prev, data];
+          console.log('Updated friend requests:', updatedRequests);
+          
+          // If no notification is currently showing, show this one
+          if (!showNotification) {
+            setCurrentRequest(data);
+            setShowNotification(true);
+          }
+          
+          return updatedRequests;
+        }
+        return prev;
+      });
+    };
+
+    const handleFriendRequestAccepted = (data: { by: { id: string; username: string } }) => {
+      console.log(`${data.by.username} accepted your friend request`);
+      
+      // Update friend status in messages
+      setFriendStatuses(prev => {
+        const newStatuses = { ...prev };
+        if (newStatuses[data.by.id]) {
+          newStatuses[data.by.id] = { isFriend: true, requestSent: false };
+        }
+        return newStatuses;
+      });
+
+      // Add system message
+      setMessages(prev => [...prev, {
+        username: 'System',
+        message: `${data.by.username} accepted your friend request!`,
+        type: 'system',
+        timestamp: new Date()
+      }]);
+
+      // Emit event to update FriendsPage
+      const friendsUpdatedEvent = new CustomEvent('friendsUpdated');
+      window.dispatchEvent(friendsUpdatedEvent);
+    };
+
+    const handleFriendRequestRejected = (data: { by: { id: string; username: string } }) => {
+      console.log(`${data.by.username} rejected your friend request`);
+      
+      // Update friend status
+      setFriendStatuses(prev => {
+        const newStatuses = { ...prev };
+        if (newStatuses[data.by.id]) {
+          newStatuses[data.by.id] = { isFriend: false, requestSent: false };
+        }
+        return newStatuses;
+      });
+
+      // Add system message
+      setMessages(prev => [...prev, {
+        username: 'System',
+        message: `${data.by.username} rejected your friend request.`,
+        type: 'system',
+        timestamp: new Date()
+      }]);
+    };
+
+    // Set up socket listeners
+    socket.on('friend-request', handleFriendRequest);
+    socket.on('friend-request-accepted', handleFriendRequestAccepted);
+    socket.on('friend-request-rejected', handleFriendRequestRejected);
+
+    // Function to fetch and update friend requests
+    const fetchAndUpdateRequests = async () => {
+      try {
+        const response = await fetch(`http://localhost:5001/api/friends/requests?userId=${playerId}`);
+        const data = await response.json();
+        
+        if (data.requests) {
+          setFriendRequests(data.requests);
+          
+          // Update current notification if needed
+          if (!showNotification && data.requests.length > 0) {
+            setCurrentRequest(data.requests[0]);
+            setShowNotification(true);
+          }
+        }
+      } catch (err) {
+        console.error("Failed to fetch friend requests:", err);
+      }
+    };
+
+    // Fetch initial friend requests and sent requests
+    const fetchInitialData = async () => {
+      try {
+        // Fetch pending requests
+        await fetchAndUpdateRequests();
+
+        // Fetch sent requests to update button states
+        const sentRequestsResponse = await fetch(`http://localhost:5001/api/friends/sent?userId=${playerId}`);
+        const sentRequestsData = await sentRequestsResponse.json();
+        
+        if (sentRequestsData.requests) {
+          const newSentRequests = sentRequestsData.requests.map((req: any) => req.to.id);
+          localStorage.setItem('sentFriendRequests', JSON.stringify(newSentRequests));
+          
+          // Update friend statuses
+          setFriendStatuses(prev => {
+            const newStatuses = { ...prev };
+            newSentRequests.forEach((id: string) => {
+              if (newStatuses[id]) {
+                newStatuses[id] = { ...newStatuses[id], requestSent: true };
+              }
+            });
+            return newStatuses;
+          });
+        }
+      } catch (err) {
+        console.error("Failed to fetch initial friend data:", err);
+      }
+    };
+
+    fetchInitialData();
+
+    // Set up periodic refresh for friend requests
+    const requestsRefreshInterval = setInterval(fetchAndUpdateRequests, 3000);
+
+    // Make sure we're in the user's personal room for real-time notifications
+    socket.emit('join-user-room', { userId: playerId });
+    console.log('Joined personal notification room:', playerId);
+
+    return () => {
+      socket.off('friend-request', handleFriendRequest);
+      socket.off('friend-request-accepted', handleFriendRequestAccepted);
+      socket.off('friend-request-rejected', handleFriendRequestRejected);
+      socket.emit('leave-user-room', { userId: playerId });
+      clearInterval(requestsRefreshInterval);
+    };
+  }, [playerId, username, showNotification]);
+
+  // Update handleAcceptRequest to properly refresh FriendsPage
+  const handleAcceptRequest = async () => {
+    if (!currentRequest) {
+      console.log('No current request to accept');
+      return;
+    }
+
+    try {
+      const response = await fetch('http://localhost:5001/api/friends/accept', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          requestId: currentRequest._id,
+          fromId: currentRequest.from.id,
+          toId: currentRequest.to.id
+        })
+      });
+
+      if (response.ok) {
+        console.log('Friend request accepted successfully');
+        
+        // Update friend statuses for all messages from this user
+        setFriendStatuses(prev => {
+          const newStatuses = { ...prev };
+          if (currentRequest) {
+            newStatuses[currentRequest.from.id] = { isFriend: true, requestSent: false };
+          }
+          return newStatuses;
+        });
+
+        // Update localStorage
+        const sentRequests = JSON.parse(localStorage.getItem('sentFriendRequests') || '[]');
+        const updatedSentRequests = sentRequests.filter((id: string) => 
+          id !== currentRequest.from.id && id !== currentRequest.to.id
+        );
+        localStorage.setItem('sentFriendRequests', JSON.stringify(updatedSentRequests));
+
+        // Remove the current request from the list
+        setFriendRequests(prev => prev.filter(req => req._id !== currentRequest._id));
+        
+        // Hide notification and clear current request
+        setShowNotification(false);
+        setCurrentRequest(null);
+
+        // Add success message to chat
+        setMessages(prev => [...prev, {
+          username: 'System',
+          message: `You are now friends with ${currentRequest.from.username}!`,
+          type: 'system',
+          timestamp: new Date()
+        }]);
+
+        // Force refresh friends list to update FriendsPage
+        try {
+          const friendsResponse = await fetch(`http://localhost:5001/api/friends?userId=${playerId}`);
+          const friendsData = await friendsResponse.json();
+          console.log('Updated friends list:', friendsData);
+
+          // Emit a custom event to notify FriendsPage
+          const friendsUpdatedEvent = new CustomEvent('friendsUpdated', {
+            detail: { friends: friendsData.friends }
+          });
+          window.dispatchEvent(friendsUpdatedEvent);
+        } catch (err) {
+          console.error("Failed to refresh friends list:", err);
+        }
+      }
+    } catch (err: any) {
+      console.error("Error accepting friend request:", err);
+      setMessages(prev => [...prev, {
+        username: 'System',
+        message: `Failed to accept friend request from ${currentRequest.from.username}. Error: ${err.message}`,
+        type: 'system',
+        timestamp: new Date()
+      }]);
+    }
+  };
+
+  // Update handleSendFriendRequest to refresh friend statuses
+  const handleSendFriendRequest = async (targetUsername: string, targetId: string) => {
+    try {
+      const response = await fetch('http://localhost:5001/api/friends/request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fromId: playerId,
+          fromUsername: username,
+          toId: targetId,
+          toUsername: targetUsername
+        })
+      });
+
+      if (!response.ok) {
+        const data = await response.json();
+        alert(data.error || "Failed to send friend request");
+      } else {
+        // Update friend status to show "Sent"
+        setFriendStatuses(prev => ({
+          ...prev,
+          [targetId]: { ...prev[targetId], requestSent: true }
+        }));
+
+        // Store in localStorage
+        const sentRequests = JSON.parse(localStorage.getItem('sentFriendRequests') || '[]');
+        if (!sentRequests.includes(targetId)) {
+          sentRequests.push(targetId);
+          localStorage.setItem('sentFriendRequests', JSON.stringify(sentRequests));
+        }
+
+        // Add system message
+        setMessages(prev => [...prev, {
+          username: 'System',
+          message: `Friend request sent to ${targetUsername}!`,
+          type: 'system',
+          timestamp: new Date()
+        }]);
+      }
+    } catch (err) {
+      console.error("Failed to send friend request:", err);
+      alert("Failed to send friend request");
+    }
+  };
+
+  // Update handleRejectRequest to match the same pattern
+  const handleRejectRequest = async () => {
+    if (!currentRequest) return;
+
+    try {
+      const response = await fetch('http://localhost:5001/api/friends/reject', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ requestId: currentRequest._id })
+      });
+
+      if (response.ok) {
+        // Remove the current request from the list
+        setFriendRequests(prev => prev.filter(req => req._id !== currentRequest._id));
+        
+        // Hide notification and clear current request
+        setShowNotification(false);
+        setCurrentRequest(null);
+      }
+    } catch (err) {
+      console.error("Failed to reject friend request:", err);
+    }
+  };
+
     return (
         <div className="chat-wrapper">
             <div className="chat-container">
@@ -488,9 +888,46 @@ export default function Chat() {
                 <div className="chat-messages">
                     {messages.map((msg, index) => (
             <div key={index} className={`chat-message ${msg.type}`}>
-                            <span className="chat-user">{msg.username}:</span> {msg.message}
-                        </div>
-                    ))}
+              <div className="message-header">
+                <span 
+                  className="chat-user"
+                  onClick={() => {
+                    if (msg.username !== username && msg.userId) {
+                      const status = friendStatuses[msg.userId];
+                      if (!status?.isFriend && !status?.requestSent) {
+                        handleSendFriendRequest(msg.username, msg.userId);
+                      }
+                    }
+                  }}
+                  style={{ 
+                    cursor: msg.username !== username && msg.userId && !friendStatuses[msg.userId]?.isFriend ? 'pointer' : 'default',
+                    position: 'relative'
+                  }}
+                >
+                  {msg.username}
+                  {msg.username !== username && msg.userId && (
+                    <span 
+                      className="friend-status"
+                      data-status={
+                        friendStatuses[msg.userId]?.isFriend 
+                          ? 'friends' 
+                          : friendStatuses[msg.userId]?.requestSent 
+                            ? 'sent' 
+                            : 'add'
+                      }
+                    >
+                      {friendStatuses[msg.userId]?.isFriend 
+                        ? "Friends" 
+                        : friendStatuses[msg.userId]?.requestSent 
+                          ? "Sent" 
+                          : "Add Friend"}
+                    </span>
+                  )}
+                </span>
+              </div>
+              <div className="message-content">{msg.message}</div>
+            </div>
+          ))}
           <div ref={messagesEndRef} />
                 </div>
 
@@ -530,6 +967,14 @@ export default function Chat() {
         >
           {hasVotedToProceed ? 'Waiting for others...' : 'Proceed to Voting'}
                     </button>
+      )}
+
+      {showNotification && currentRequest && (
+        <FriendRequestNotification
+          from={currentRequest.from}
+          onAccept={handleAcceptRequest}
+          onReject={handleRejectRequest}
+        />
       )}
         </div>
     );

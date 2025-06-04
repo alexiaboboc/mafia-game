@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import "../styles/LoginRegisterPanel.css";
 import axios from "axios";
 import { useNavigate } from "react-router-dom";
+import { connectSocket } from "../socket";
 
 interface Props {
   show?: boolean;
@@ -41,6 +42,10 @@ export default function LoginRegisterPanel({ show = false }: Props) {
         sessionStorage.setItem("username", response.data.user.username);
         sessionStorage.setItem("email", response.data.user.email);
         sessionStorage.setItem("id", response.data.user.id);
+
+        // Connect socket after successful login
+        connectSocket(response.data.user.id);
+        
         navigate("/menu");
       }
     } catch (error: any) {

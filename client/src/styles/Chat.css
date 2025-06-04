@@ -121,9 +121,14 @@
 }
 
 .chat-user {
-  font-weight: 600;
-  color: #b175ff;
-  margin-right: 0.5rem;
+  font-weight: bold;
+  color: #a873e8;
+  transition: all 0.2s ease;
+}
+
+.chat-user:hover {
+  color: #8a5cc5;
+  text-decoration: underline;
 }
 
 .chat-input-wrapper {
@@ -320,4 +325,57 @@
     .chat-vote-button {
       margin-top: 0.8rem;
     }
+}
+
+.message-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.3rem;
+}
+
+.message-content {
+  margin-left: 0.5rem;
+}
+
+.friend-status {
+  font-size: 0.75rem;
+  padding: 2px 6px;
+  border-radius: 4px;
+  margin-left: 0.5rem;
+  background: rgba(168, 115, 232, 0.6);
+  border: 1px solid rgba(168, 115, 232, 0.7);
+  color: white;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.friend-status:hover {
+  background: rgba(168, 115, 232, 0.8);
+  transform: scale(1.05);
+}
+
+.friend-status[data-status="sent"] {
+  background: rgba(128, 128, 128, 0.6);
+  border: 1px solid rgba(128, 128, 128, 0.7);
+  cursor: not-allowed;
+  transform: none;
+}
+
+.friend-status[data-status="friends"] {
+  background: rgba(96, 165, 250, 0.6);
+  border: 1px solid rgba(96, 165, 250, 0.7);
+  cursor: not-allowed;
+  transform: none;
+}
+
+.friend-status[data-status="add"] {
+  background: rgba(168, 115, 232, 0.6);
+  border: 1px solid rgba(168, 115, 232, 0.7);
+  cursor: pointer;
+}
+
+.friend-status[data-status="add"]:hover {
+  background: rgba(168, 115, 232, 0.8);
+  transform: scale(1.05);
 }
