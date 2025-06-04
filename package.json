@@ -1,5 +1,8 @@
 {
   "dependencies": {
     "nodemailer": "^7.0.3"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.2"
   }
 }
