@@ -73,10 +73,12 @@ const roleDescriptions: Record<string, string> = {
   queen: "The queen is choosing someone to nullify their power tonight...",
   mutilator: "The mutilator is deciding who to silence and how...",
   killer: "The killer is selecting their target to eliminate...",
-  doctor: "The doctor is choosing who to heal and save from death...",
+  doctor: "The doctor is choosing who to heal and save from death (healing also removes silence)...",
   "serial-killer": "The serial killer is picking their victim for tonight...",
   sacrifice: "The sacrifice is resting, waiting for the town's judgment...",
+  "sacrifice-revenge": "The sacrifice is choosing their final victim...",
   policeman: "The policeman is taking aim at a suspect...",
+  "policeman-dying": "The policeman is dying from a broken heart...",
   sheriff: "The sheriff is investigating someone's allegiance...",
   lookout: "The lookout is watching someone's house to see visitors...",
   mayor: "The mayor is sleeping soundly, preserving their strength...",
@@ -87,21 +89,16 @@ const yourTurnMessages: Record<string, string> = {
   queen: "Choose someone to nullify their power tonight",
   mutilator: "Choose someone to silence (chat or vote)",
   killer: "Choose your target to eliminate (cannot kill Serial Killer)",
-  doctor: "Choose someone to heal and save from death",
+  doctor: "Choose someone to heal and save from death (also removes any silence effects)",
   "serial-killer": "Choose your victim (can kill anyone including mafia)",
   sacrifice: "You must wait - convince the town to vote you out tomorrow",
+  "sacrifice-revenge": "Choose someone to take with you to the afterlife",
   policeman: "Choose someone to shoot (only from round 2+)",
-  sheriff: "Choose someone to investigate their allegiance",
-  lookout: "Choose someone to watch and see their visitors",
+  "policeman-dying": "You died from a broken heart after shooting an innocent...",
+  sheriff: "Choose someone to investigate (👍 = Mafia/SK, 👎 = Innocent, 🤷‍♀️ = Queen visited)",
+  lookout: "Choose someone to watch (you will see who visits them tonight)",
   mayor: "You have no night action - rest and preserve your vote power",
   citizen: "You have no night action - sleep and hope for dawn"
-};
-
-const getYourTurnMessage = (role: string, round: number) => {
-  if (role === "policeman" && round < 2) {
-    return "You cannot shoot until round 2. Rest and wait.";
-  }
-  return yourTurnMessages[role] || "Choose your action";
 };
 
 const actionRoles = [
@@ -128,6 +125,7 @@ interface Player {
   alive: boolean;
   muted?: boolean;
   healedSelf?: boolean; // Track if doctor has used self-heal
+  dieNextRound?: boolean; // Track if policeman is dying from broken heart
 }
 
 interface NightResult {
@@ -251,7 +249,8 @@ export default function NightActions() {
         // Check if current player is dead
         const currentPlayer = data.players.find((p: Player) => p.id === playerId);
         if (currentPlayer) {
-          setIsDead(!currentPlayer.alive);
+          // Only set as dead if actually dead, not if marked to die next round
+          setIsDead(!currentPlayer.alive && !currentPlayer.dieNextRound);
           if (!currentRole) {
             sessionStorage.setItem("role", currentPlayer.role);
             window.location.reload(); // Reload to get the role
@@ -291,13 +290,16 @@ export default function NightActions() {
       }, 1000);
     };
 
-    const handleNightActionStarted = ({ role, isDead, isPromoted, narration }: { 
-      role: string, 
-      isDead?: boolean,
-      isPromoted?: boolean,
-      narration?: string 
-    }) => {
-      console.log('Night action started event received:', { role, isDead, isPromoted, narration });
+    const handleNightActionStarted = ({ role, isDead, isPromoted, narration, isNoActionRole, isSacrificeRevenge }: any) => {
+      console.log('🌙 Night action started event received:', { 
+        role, isDead, isPromoted, narration, isNoActionRole, isSacrificeRevenge 
+      });
+      console.log('🎭 Current client state:', {
+        currentRole,
+        sessionRole: sessionStorage.getItem("role"),
+        playerId,
+        username: sessionStorage.getItem("username")
+      });
       
       // Validate that this role is actually in the game
       if (!rolesInGame.includes(role)) {
@@ -311,44 +313,64 @@ export default function NightActions() {
       setActionCompleted(null);
       setHasActed(false);
 
-      // Check if killer is dead and current player is mutilator
+      // Check if killer is dead and role is mutilator
       const isKillerDead = !players.find(p => p.role === "killer" && p.alive);
-      const isCurrentPlayerMutilator = sessionStorage.getItem("role") === "mutilator";
+      const mutilatorPlayer = players.find(p => p.role === "mutilator");
       
-      if (isKillerDead && isCurrentPlayerMutilator) {
-        console.log('Killer is dead and current player is mutilator - promoting to killer');
-        sessionStorage.setItem("role", "killer");
-        window.location.reload();
+      console.log('🔍 Mutilator promotion check:', {
+        role,
+        isKillerDead,
+        mutilatorPlayer: mutilatorPlayer?.username,
+        mutilatorAlive: mutilatorPlayer?.alive
+      });
+      
+      // Special case: mutilator when killer is dead
+      if (role === "mutilator" && isKillerDead && mutilatorPlayer?.alive) {
+        console.log('✅ Mutilator turn with dead killer - showing narration only');
+        setActionCompleted("mutilator-promotion");
+        
+        // Promote mutilator to killer in local storage if this is the current player
+        if (mutilatorPlayer.id === playerId) {
+          console.log('🔄 Promoting current player from mutilator to killer in sessionStorage');
+          sessionStorage.setItem("role", "killer");
+          setCurrentRole("killer");
+        }
+        
+        // Server will handle the auto-completion after 5 seconds
         return;
       }
 
-      // If this is a dead player's turn, show their role description and auto-complete after 5 seconds
-      if (isDead) {
-        console.log('Dead player turn:', role);
+      // Check if this is the killer role and current player was the mutilator
+      if (role === "killer") {
+        const currentPlayerSessionRole = sessionStorage.getItem("role");
+        console.log('🎯 Killer role event - checking if current player should act:', {
+          role,
+          currentPlayerSessionRole,
+          currentRole,
+          playerId,
+          killerInPlayers: players.find(p => p.role === "killer")
+        });
+        
+        // If session role is killer (was promoted from mutilator), this is our turn
+        if (currentPlayerSessionRole === "killer") {
+          console.log('✅ Current player is the new killer - this is our turn!');
+          setCurrentRole("killer");
+        }
+      }
+
+      // Check if current player is policeman dying from broken heart
+      const currentPlayer = players.find(p => p.id === playerId);
+      const isPolicemanDying = currentPlayer?.role === "policeman" && currentPlayer.dieNextRound;
+      
+      // If this is a dead player's turn, a role without night action, or policeman dying, show their role description and auto-complete
+      if ((isDead && !isSacrificeRevenge) || isNoActionRole || isPolicemanDying) {
+        console.log('🪦 Dead player, no-action role, or dying policeman turn:', role);
         setActionCompleted(role);
-        setTimeout(() => {
-          socket.emit('night-action-completed', { 
-            code: lobbyCode, 
-            role: role, 
-            target: role 
-          });
-        }, 5000);
+        // For no-action roles and dying players, the server will handle the auto-completion
         return;
       }
-
-      // If this is mutilator's turn and killer is dead, show mutilator message for 5 seconds then continue
-      if (role === "mutilator" && isKillerDead) {
-        console.log('Showing mutilator message before killer promotion');
-        setActionCompleted("mutilator");
-        setTimeout(() => {
-          socket.emit('night-action-completed', { 
-            code: lobbyCode, 
-            role: "mutilator",
-            target: "mutilator" 
-          });
-        }, 5000);
-        return;
-      }
+      
+      console.log('✅ Role event processed, activeRole set to:', role);
     };
 
     const handleNightActionCompleted = ({ role, target }: { role: string, target: string }) => {
@@ -529,11 +551,68 @@ export default function NightActions() {
     })
     .then(() => {
       console.log('Action sent to server, emitting completion');
-      socket.emit('night-action-completed', { 
-        code: lobbyCode, 
-        role: currentRole, 
-        target: targetUsername 
-      });
+      
+      // For Lookout and Sheriff, show immediate result
+      if (currentRole === "lookout") {
+        // Get current round's actions for the target
+        const currentRound = gameRound;
+        const targetPlayer = players.find(p => p.username === targetUsername);
+        if (targetPlayer) {
+          const visitors = players.filter(p => 
+            p.id !== playerId && // Exclude lookout
+            p.id !== targetPlayer.id && // Exclude target
+            p.alive // Only alive players
+          ).map(p => p.username);
+          
+          setActionCompleted(`${targetUsername} - ${visitors.length > 0 ? visitors.join(", ") : "No visitors"}`);
+        } else {
+          setActionCompleted(targetUsername);
+        }
+        
+        // Wait 3 seconds before proceeding to next role
+        setTimeout(() => {
+          socket.emit('night-action-completed', { 
+            code: lobbyCode, 
+            role: currentRole, 
+            target: targetUsername 
+          });
+        }, 3000);
+      } else if (currentRole === "sheriff") {
+        // Determine result based on target's role
+        const targetPlayer = players.find(p => p.username === targetUsername);
+        let result = "👎"; // Default to innocent
+        
+        if (targetPlayer) {
+          if (['killer', 'mutilator', 'serial-killer'].includes(targetPlayer.role)) {
+            result = "👍"; // Mafia or Serial Killer
+          } else if (targetPlayer.role === 'queen') {
+            result = "🤷‍♀️"; // Queen
+          }
+        }
+        
+        // Only show result to the sheriff
+        if (sessionStorage.getItem("role") === "sheriff") {
+          setActionCompleted(`${targetUsername} - ${result}`);
+        } else {
+          setActionCompleted(targetUsername);
+        }
+        
+        // Wait 3 seconds before proceeding to next role
+        setTimeout(() => {
+          socket.emit('night-action-completed', { 
+            code: lobbyCode, 
+            role: currentRole, 
+            target: targetUsername 
+          });
+        }, 3000);
+      } else {
+        // For other roles, proceed normally
+        socket.emit('night-action-completed', { 
+          code: lobbyCode, 
+          role: currentRole, 
+          target: targetUsername 
+        });
+      }
     })
     .catch(err => {
       console.error("❌ Failed to send action:", err);
@@ -594,19 +673,65 @@ export default function NightActions() {
     });
   };
 
-  const getActionMessage = (role: string, target: string) => {
+  const getYourTurnMessage = (role: string, round: number, isSacrificeRevenge?: boolean) => {
+    // Remove the mutilator promotion logic from here since it's handled elsewhere
+    
+    if (role === "policeman") {
+      const currentPlayer = players.find(p => p.id === playerId);
+      if (currentPlayer?.dieNextRound) {
+        return yourTurnMessages["policeman-dying"];
+      }
+      if (round < 2) {
+        return "You cannot shoot until round 2. Rest and wait.";
+      }
+    }
+    if (role === "sacrifice" && isSacrificeRevenge) {
+      return yourTurnMessages["sacrifice-revenge"];
+    }
+    if (role === "lookout") {
+      return "Choose someone to watch - you will see who visits them tonight";
+    }
+    if (role === "sheriff") {
+      return "Choose someone to investigate:\n👍 = Mafia or Serial Killer\n👎 = Innocent\n🤷‍♀️ = If visited by Queen";
+    }
+    return yourTurnMessages[role] || "Choose your action";
+  };
+
+  const getActionMessage = (role: string, target: string, isSacrificeRevenge?: boolean) => {
     if (target === "no-action") {
       return `${role === "sacrifice" ? "The sacrifice" : role === "mayor" ? "The mayor" : "The citizen"} rests quietly through the night.`;
     }
 
-    // If it's mutilator's turn and killer is dead, show mutilator message
-    const isKillerDead = !players.find(p => p.role === "killer" && p.alive);
-    if (role === "mutilator" && isKillerDead) {
+    // Special case for mutilator promotion - show original mutilator description
+    if (target === "mutilator-promotion") {
       return roleDescriptions["mutilator"];
+    }
+
+    // Special handling for Lookout and Sheriff
+    if (role === "lookout") {
+      // Extract visitors from target string (format: "username - visitor1, visitor2")
+      const [username, visitors] = target.split(" - ");
+      return `You are watching ${username}...\nVisitors: ${visitors}`;
+    }
+    if (role === "sheriff") {
+      // Only show result to the sheriff
+      if (sessionStorage.getItem("role") === "sheriff") {
+        const [username, result] = target.split(" - ");
+        return `You investigated ${username} and found: ${result}`;
+      }
+      return roleDescriptions["sheriff"];
     }
 
     // Always show the role description from roleDescriptions if available
     if (roleDescriptions[role]) {
+      if (role === "sacrifice" && isSacrificeRevenge) {
+        return roleDescriptions["sacrifice-revenge"];
+      }
+      // For policeman dying from broken heart, show normal message to others
+      const currentPlayer = players.find(p => p.id === playerId);
+      if (role === "policeman" && currentPlayer?.dieNextRound && currentPlayer.id === playerId) {
+        return roleDescriptions["policeman-dying"];
+      }
       return roleDescriptions[role];
     }
     
@@ -616,18 +741,24 @@ export default function NightActions() {
       killer: "The killer has made their choice and marked their target.",
       doctor: "The doctor has made their choice and prepared to heal someone.",
       "serial-killer": "The serial killer has made their choice and selected their victim.",
+      sacrifice: "The sacrifice rests, waiting for dawn and judgment.",
+      "sacrifice-revenge": "The sacrifice has chosen their final victim.",
       policeman: "The policeman has made their choice and taken aim.",
       sheriff: "The sheriff has made their choice and begun their investigation.",
       lookout: "The lookout has made their choice and begun watching.",
-      sacrifice: "The sacrifice rests, waiting for dawn and judgment.",
       mayor: "The mayor sleeps soundly, preserving their strength.",
       citizen: "The citizen sleeps peacefully, hoping for a better tomorrow."
     };
+    
+    if (role === "sacrifice" && isSacrificeRevenge) {
+      return messages["sacrifice-revenge"];
+    }
     return messages[role] || "Night passes quietly...";
   };
 
   const getNightResultMessage = () => {
     const { deaths, muted, wills, investigations, lookoutResults, gameOver, gameOverMessage } = nightResult;
+    const currentPlayerRole = sessionStorage.getItem("role");
     
     if (gameOver) {
       return gameOverMessage;
@@ -635,6 +766,7 @@ export default function NightActions() {
     
     let message = "";
     
+    // Show deaths to everyone
     if (deaths.length === 0) {
       message = "No one died tonight. Silence falls over the town.";
     } else {
@@ -655,6 +787,7 @@ export default function NightActions() {
       message = `☠️ ${deathMessages.join(", ")} died during the night.`;
     }
 
+    // Show muted players to everyone
     if (muted.length > 0) {
       // Handle both old and new muted format
       if (Array.isArray(muted) && muted.length > 0 && typeof muted[0] === 'object') {
@@ -668,29 +801,35 @@ export default function NightActions() {
       }
     }
 
-    // Add investigation results for sheriff
-    if (investigations && Object.keys(investigations).length > 0) {
-      message += `\n🔍 Investigation results:`;
-      Object.entries(investigations).forEach(([sheriff, result]) => {
-        message += `\n${sheriff}: ${result}`;
-      });
+    // Show investigation results only to the Sheriff
+    if (currentPlayerRole === "sheriff" && investigations && Object.keys(investigations).length > 0) {
+      const currentPlayerUsername = sessionStorage.getItem("username");
+      if (currentPlayerUsername && investigations[currentPlayerUsername]) {
+        message += `\n🔍 Investigation result: ${investigations[currentPlayerUsername]}`;
+      }
     }
 
-    // Add lookout results
-    if (lookoutResults && Object.keys(lookoutResults).length > 0) {
-      message += `\n👁️ Lookout reports:`;
-      Object.entries(lookoutResults).forEach(([lookout, visitors]) => {
-        const visitorList = Array.isArray(visitors) && visitors.length > 0 ? visitors.join(", ") : "No visitors";
-        message += `\n${lookout} saw: ${visitorList}`;
-      });
+    // Show lookout results only to the Lookout
+    if (currentPlayerRole === "lookout" && lookoutResults && Object.keys(lookoutResults).length > 0) {
+      const currentPlayerUsername = sessionStorage.getItem("username");
+      if (currentPlayerUsername && lookoutResults[currentPlayerUsername]) {
+        const myVisitors = lookoutResults[currentPlayerUsername];
+        const visitorList = Array.isArray(myVisitors) && myVisitors.length > 0 ? myVisitors.join(", ") : "No visitors";
+        message += `\n👁️ You saw: ${visitorList}`;
+      }
     }
 
     return message;
   };
 
   // Determine what to show
-  const isMyTurn = activeRole === currentRole && actionRoles.includes(currentRole) && !hasActed && !isDead;
-  const alivePlayers = players.filter(p => p.alive && p.username !== username);
+  const isMyTurn = (activeRole === currentRole && actionRoles.includes(currentRole) && !hasActed && !isDead) ||
+                   // Special case: if activeRole is "killer" and current player was promoted from mutilator to killer
+                   (activeRole === "killer" && currentRole === "killer" && sessionStorage.getItem("role") === "killer" && !hasActed && !isDead);
+  const alivePlayers = players.filter(p => {
+    // Include players who are alive OR marked to die next round (policeman)
+    return (p.alive || p.dieNextRound) && p.username !== username;
+  });
   
   // Special case: Policeman cannot act in round 1
   const canActuallyAct = currentRole !== "policeman" || gameRound >= 2;
@@ -797,7 +936,7 @@ export default function NightActions() {
         ) : isMyTurn ? (
           <div className="player-turn-ui fade-in-section">
             <h2 className="your-turn">Your turn</h2>
-            <p className="turn-instruction">{getYourTurnMessage(currentRole, gameRound)}</p>
+            <p className="turn-instruction">{getYourTurnMessage(currentRole, gameRound, nightResult.gameOver)}</p>
             <div className="card-grid">
               <img
                 className="your-role-img"
@@ -891,7 +1030,7 @@ export default function NightActions() {
         ) : (
           <h2 className="night-text fade-in-section">
             {actionCompleted && activeRole && rolesInGame.includes(activeRole) ? 
-              getActionMessage(activeRole, actionCompleted) : 
+              getActionMessage(activeRole, actionCompleted, nightResult.gameOver) : 
               activeRole && rolesInGame.includes(activeRole) ? 
                 roleDescriptions[activeRole] : 
                 "Night passes quietly..."
