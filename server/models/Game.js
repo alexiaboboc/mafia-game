@@ -8,6 +8,10 @@ const PlayerSchema = new mongoose.Schema({
   muted: { type: String, default: null }, // 'chat' sau 'vote'
   healedSelf: { type: Boolean, default: false },
   revealed: { type: Boolean, default: false },
+  dieNextRound: { type: Boolean, default: false }, // Track players who will die next round
+  canRevenge: { type: Boolean, default: false }, // Track if Sacrifice can use revenge
+  hasUsedRevenge: { type: Boolean, default: false }, // Track if Sacrifice has used revenge
+  isSpectator: { type: Boolean, default: false } // Track if player is a spectator (like Sacrifice after revenge)
 });
 
 const GameSchema = new mongoose.Schema({

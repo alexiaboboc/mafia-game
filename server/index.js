@@ -979,54 +979,7 @@ io.on('connection', socket => {
 
   socket.on('join-night-actions', async ({ code }) => {
     try {
-      console.log('Client joining night actions for code:', code);
-      const game = await Game.findOne({ code });
-      if (!game) {
-        console.log('Game not found for code:', code);
-        return;
-      }
-
-      // Get actual roles in the game, not from roleOrder
-      const actualGameRoles = game.players.map(p => p.role);
-      
-      // Filter roleOrder to only include roles that are actually in this game
-      const rolesInGame = roleOrder.filter(r => actualGameRoles.includes(r));
-
-      if (rolesInGame.length === 0) {
-        console.log('No roles found in game');
-        return;
-      }
-
-      console.log('Actual roles in game:', actualGameRoles);
-      console.log('Ordered roles for night:', rolesInGame);
-
-      // If we have a current role set, emit it. Otherwise start with the first role.
-      let currentRole = game.currentRole;
-      if (!currentRole || !actualGameRoles.includes(currentRole)) {
-        currentRole = rolesInGame[0];
-        game.currentRole = currentRole;
-        await game.save();
-        console.log('Starting night phase with first role:', currentRole);
-      } else {
-        console.log('Resuming night phase with current role:', currentRole);
-      }
-
-      // Emit the current role's turn to this specific client
-      socket.emit('night-action-started', { role: currentRole });
-      
-      // Also emit to all clients in the room to sync everyone
-      setTimeout(() => {
-        io.in(code).emit('night-action-started', { role: currentRole });
-        console.log('Night action started event emitted for role:', currentRole);
-      }, 500);
-    } catch (error) {
-      console.error('Error joining night actions:', error);
-    }
-  });
-
-  socket.on('night-action-completed', async ({ code, role, target }) => {
-    try {
-      console.log('Night action completed:', { code, role, target });
+      console.log('Player joining night actions:', { code });
       const game = await Game.findOne({ code });
       if (!game) {
         console.log('Game not found for code:', code);
@@ -1036,84 +989,106 @@ io.on('connection', socket => {
       // Get actual roles in the game
       const actualGameRoles = game.players.map(p => p.role);
       const rolesInGame = roleOrder.filter(r => actualGameRoles.includes(r));
-      const currentRoleIndex = rolesInGame.indexOf(role);
-
-      // Broadcast completion
-      io.in(code).emit('night-action-completed', { role, target });
-
-      if (currentRoleIndex < rolesInGame.length - 1) {
-        const nextRole = rolesInGame[currentRoleIndex + 1];
-        game.currentRole = nextRole;
+      
+      // Get current role
+      const currentRole = game.currentRole;
+      if (!currentRole) {
+        // Start with first role
+        game.currentRole = rolesInGame[0];
         await game.save();
-        
-        await new Promise(resolve => setTimeout(resolve, 3000));
-        
-        const nextRolePlayer = game.players.find(p => p.role === nextRole);
-        
-        // Check if next role's player is dead
-        if (nextRolePlayer && !nextRolePlayer.alive) {
-          // Show dead player's quote
-          io.in(code).emit('night-action-started', { 
-            role: nextRole,
-            isDead: true,
-            narration: `${nextRolePlayer.username} (${nextRole}) is no longer with us...`
+      }
+      
+      // Get the current role player
+      const currentRolePlayer = game.players.find(p => p.role === game.currentRole);
+      
+      // Check if it's Sacrifice's revenge turn
+      const isSacrificeRevenge = currentRolePlayer?.role === 'sacrifice' && 
+                                currentRolePlayer.canRevenge && 
+                                !currentRolePlayer.hasUsedRevenge;
+      
+      // Check if killer is dead and current role is mutilator
+      const isKillerDead = !game.players.find(p => p.role === "killer" && p.alive);
+      const isMutilatorWithDeadKiller = game.currentRole === "mutilator" && isKillerDead;
+      
+      // Save promotion info before making the change
+      let promotionHappened = false;
+      
+      // If mutilator when killer is dead, promote mutilator to killer first
+      if (isMutilatorWithDeadKiller) {
+        const mutilatorPlayer = game.players.find(p => p.role === "mutilator" && p.alive);
+        if (mutilatorPlayer) {
+          console.log('Promoting mutilator to killer:', mutilatorPlayer.username);
+          mutilatorPlayer.role = "killer";
+          promotionHappened = true;
+          await game.save();
+        }
+      }
+      
+      const isNoActionRole = ["mayor", "citizen"].includes(game.currentRole) || 
+                            (game.currentRole === "sacrifice" && !isSacrificeRevenge) ||
+                            isMutilatorWithDeadKiller; // Treat mutilator as no-action when killer is dead
+      
+      // Emit current role to all clients
+      io.in(code).emit('night-action-started', { 
+        role: game.currentRole,
+        isDead: !currentRolePlayer?.alive && !isSacrificeRevenge,
+        isNoActionRole: isNoActionRole,
+        isSacrificeRevenge: isSacrificeRevenge
+      });
+      
+      console.log('Night action started event emitted for role:', {
+        role: game.currentRole,
+        isSacrificeRevenge,
+        isNoActionRole,
+        isMutilatorWithDeadKiller,
+        promotionHappened
+      });
+
+      // If it's a no-action role (including mutilator with dead killer), automatically complete it after 5 seconds
+      if (isNoActionRole) {
+        console.log('🕒 No-action role turn, will auto-complete in 5 seconds:', game.currentRole, 'promotionHappened:', promotionHappened);
+        setTimeout(async () => {
+          console.log('⏰⏰⏰ TIMEOUT EXECUTED FOR ROLE:', game.currentRole, '⏰⏰⏰');
+          console.log('⏰ Timeout triggered for role:', game.currentRole);
+          
+          // Get fresh game state
+          const updatedGame = await Game.findOne({ code });
+          if (!updatedGame) {
+            console.log('❌ Game not found in timeout for code:', code);
+            return;
+          }
+          
+          console.log('🔍 Checking current role in timeout:', {
+            timeoutRole: game.currentRole,
+            dbCurrentRole: updatedGame.currentRole,
+            match: updatedGame.currentRole === game.currentRole
           });
           
-          await new Promise(resolve => setTimeout(resolve, 5000));
-          
-          // Find next alive role
-          const nextAliveRoleIndex = rolesInGame.findIndex((r, i) => 
-            i > currentRoleIndex + 1 && game.players.find(p => p.role === r)?.alive
-          );
-          
-          if (nextAliveRoleIndex !== -1) {
-            const nextAliveRole = rolesInGame[nextAliveRoleIndex];
-            game.currentRole = nextAliveRole;
-            await game.save();
+          if (updatedGame && updatedGame.currentRole === game.currentRole) {
+            // Use the saved promotion info instead of recalculating
+            const target = promotionHappened ? "mutilator-promotion" : "no-action";
             
-            // Handle mutilator promotion to killer
-            if (nextAliveRole === 'mutilator') {
-              const mutilator = game.players.find(p => p.role === 'mutilator');
-              const killer = game.players.find(p => p.role === 'killer');
-              
-              if (mutilator && mutilator.alive && killer && !killer.alive) {
-                // Promote mutilator to killer
-                mutilator.role = 'killer';
-                await game.save();
-                
-                // Show promotion message
-                io.in(code).emit('night-action-started', { 
-                  role: 'mutilator',
-                  isPromoted: true,
-                  narration: `${mutilator.username} has been promoted to Killer!`
-                });
-                
-                await new Promise(resolve => setTimeout(resolve, 5000));
-                
-                // Update game roles
-                const updatedGame = await Game.findOne({ code });
-                if (updatedGame) {
-                  const updatedRoles = updatedGame.players.map(p => p.role);
-                  const updatedRolesInGame = roleOrder.filter(r => updatedRoles.includes(r));
-                  io.in(code).emit('roles-updated', { roles: updatedRolesInGame });
-                }
-              }
-            }
+            console.log('✅ Auto-completing role:', game.currentRole, 'with target:', target);
+            console.log('🚀 About to call handleNightActionCompleted...');
             
-            io.in(code).emit('night-action-started', { role: nextAliveRole });
+            // Call the night-action-completed logic directly
+            await handleNightActionCompleted(code, game.currentRole, target, io);
+            
+            console.log('✅ handleNightActionCompleted call completed');
           } else {
-            await endNightPhase(code);
+            console.log('⚠️ Role has changed, skipping timeout completion');
           }
-        } else {
-          io.in(code).emit('night-action-started', { role: nextRole });
-        }
+        }, 5000);
       } else {
-        await new Promise(resolve => setTimeout(resolve, 3000));
-        await endNightPhase(code);
+        console.log('👤 Role requires player action, no timeout set');
       }
     } catch (error) {
-      console.error('Error handling night action:', error);
+      console.error('Error joining night actions:', error);
     }
+  });
+
+  socket.on('night-action-completed', async ({ code, role, target }) => {
+    await handleNightActionCompleted(code, role, target, io);
   });
 
   // Chat message handling
@@ -1262,17 +1237,29 @@ io.on('connection', socket => {
 
         // Start vote timer if not already started and time remaining
         if (!game.voteTimerStarted && timeLeft > 0) {
+          console.log(`⏰ Starting vote timer for ${timeLeft} seconds for game ${code}`);
+          
+          // Set timer flag first to prevent race conditions
           game.voteTimerStarted = true;
           await game.save();
           
-          console.log(`Starting vote timer for ${timeLeft} seconds`);
-          
+          // Use a global timer to prevent multiple timers
           setTimeout(async () => {
-            await endVotingPhase(code);
+            try {
+              const currentGame = await Game.findOne({ code });
+              if (currentGame && currentGame.phase === 'voting' && currentGame.voteTimerStarted) {
+                console.log(`⏰ Vote timer expired for game ${code}, ending voting`);
+                await endVotingPhase(code);
+              } else {
+                console.log(`⏰ Vote timer expired but voting already ended for game ${code}`);
+              }
+            } catch (error) {
+              console.error('❌ Error in vote timer expiration:', error);
+            }
           }, timeLeft * 1000);
         } else if (timeLeft <= 0) {
           // Time already expired, end voting immediately
-          console.log('Vote time expired, ending voting');
+          console.log('⏰ Vote time already expired, ending voting immediately');
           await endVotingPhase(code);
           return;
         }
@@ -1327,8 +1314,8 @@ io.on('connection', socket => {
       }
 
       const voter = game.players.find(p => p.username === username);
-      if (!voter || !voter.alive) {
-        console.log('Invalid voter or voter is dead');
+      if (!voter || !voter.alive || voter.isSpectator) {
+        console.log('Invalid voter, voter is dead, or is spectator');
         return;
       }
 
@@ -1368,21 +1355,26 @@ io.on('connection', socket => {
         timeLeft: actualTimeLeft
       });
 
-      // Check if all alive, non-muted players have voted
-      const eligibleVoters = game.players.filter(p => p.alive && p.muted !== 'vote');
+      // Check if all alive, non-muted, non-spectator players have voted
+      const eligibleVoters = game.players.filter(p => p.alive && p.muted !== 'vote' && !p.isSpectator);
       const votedPlayers = Array.from(game.votingState.votes.keys());
       
-      console.log('Vote check:', {
+      console.log('🗳️ Vote check details:', {
+        allPlayers: game.players.map(p => ({ username: p.username, alive: p.alive, muted: p.muted, isSpectator: p.isSpectator })),
         eligibleVoters: eligibleVoters.map(p => p.username),
         votedPlayers: votedPlayers,
         eligibleCount: eligibleVoters.length,
-        votedCount: votedPlayers.length
+        votedCount: votedPlayers.length,
+        allVotes: Object.fromEntries(game.votingState.votes),
+        shouldEndVoting: votedPlayers.length >= eligibleVoters.length
       });
 
       // If all eligible players have voted, end voting immediately
       if (votedPlayers.length >= eligibleVoters.length) {
-        console.log('All eligible players have voted, ending voting immediately');
+        console.log('⚠️ All eligible players have voted, ending voting immediately');
         await endVotingPhase(code);
+      } else {
+        console.log('✅ Not all players voted yet, continuing voting timer');
       }
 
       console.log('Vote recorded and broadcasted');
@@ -1484,6 +1476,15 @@ async function endVotingPhase(code) {
       return;
     }
 
+    // Prevent multiple executions by marking the vote as ended
+    if (game.voteEnding) {
+      console.log('⚠️ Voting is already ending, skipping duplicate call');
+      return;
+    }
+    
+    game.voteEnding = true;
+    await game.save();
+
     const votesMap = game.votingState?.votes || new Map();
     const votes = Object.fromEntries(votesMap);
     const alivePlayers = game.players.filter(p => p.alive);
@@ -1574,6 +1575,7 @@ async function endVotingPhase(code) {
     game.phase = 'results';
     game.votingState = null;
     game.voteTimerStarted = false;
+    game.voteEnding = false; // Reset the ending flag
     await game.save();
 
     console.log('💾 Game state updated, emitting vote-ended event');
@@ -1746,7 +1748,7 @@ async function checkVictoryConditions(code) {
       ['queen', 'doctor', 'policeman', 'sheriff', 'lookout', 'mayor', 'citizen'].includes(p.role)
     );
     const serialKiller = alivePlayers.filter(p => p.role === 'serial-killer');
-    const sacrifice = alivePlayers.filter(p => p.role === 'sacrifice');
+    const sacrifice = game.players.find(p => p.role === 'sacrifice' && p.hasUsedRevenge);
 
     console.log('Victory check:', {
       total: alivePlayers.length,
@@ -1754,30 +1756,36 @@ async function checkVictoryConditions(code) {
       mafia: mafia.length,
       town: town.length,
       serialKiller: serialKiller.length,
-      sacrifice: sacrifice.length
+      sacrifice: sacrifice ? 'completed revenge' : 'not completed'
     });
 
     // Check edge case: only 1 or 2 players left
     if (alivePlayers.length <= 1) {
+      let winners = [];
+      let messages = [];
+
       if (serialKiller.length > 0) {
-        return {
-          gameOver: true,
-          winner: 'serial-killer',
-          message: '🔪 The Serial Killer has eliminated everyone! Chaos reigns supreme!',
-          alivePlayers
-        };
+        winners.push('serial-killer');
+        messages.push('🔪 The Serial Killer has eliminated everyone! Chaos reigns supreme!');
       } else if (mafia.length > 0) {
-        return {
-          gameOver: true,
-          winner: 'mafia',
-          message: '🔴 The Mafia has taken control! Darkness triumphs!',
-          alivePlayers
-        };
+        winners.push('mafia');
+        messages.push('🔴 The Mafia has taken control! Darkness triumphs!');
       } else if (town.length > 0) {
+        winners.push('town');
+        messages.push('🏛️ The Town survives! Justice triumphs!');
+      }
+
+      // Add Sacrifice to winners if they completed their revenge
+      if (sacrifice) {
+        winners.push('sacrifice');
+        messages.push('💀 The Sacrifice has completed their revenge from beyond!');
+      }
+
+      if (winners.length > 0) {
         return {
           gameOver: true,
-          winner: 'town',
-          message: '🏛️ The Town survives! Justice triumphs!',
+          winners,
+          message: messages.join('\n'),
           alivePlayers
         };
       }
@@ -1785,41 +1793,55 @@ async function checkVictoryConditions(code) {
 
     // Serial Killer wins if they're the last player or among the last 2 (with advantage)
     if (serialKiller.length > 0 && alivePlayers.length <= 2) {
+      let winners = ['serial-killer'];
+      let messages = ['🔪 The Serial Killer has eliminated everyone! Chaos reigns supreme!'];
+      
+      if (sacrifice) {
+        winners.push('sacrifice');
+        messages.push('💀 The Sacrifice has completed their revenge from beyond!');
+      }
+
       return {
         gameOver: true,
-        winner: 'serial-killer',
-        message: '🔪 The Serial Killer has eliminated everyone! Chaos reigns supreme!',
+        winners,
+        message: messages.join('\n'),
         alivePlayers
       };
     }
 
     // Mafia wins if they equal or outnumber non-mafia players (excluding serial killer if present)
-    const nonMafiaPlayers = town.length + sacrifice.length;
+    const nonMafiaPlayers = town.length;
     if (mafia.length > 0 && mafia.length >= nonMafiaPlayers && serialKiller.length === 0) {
+      let winners = ['mafia'];
+      let messages = ['🔴 The Mafia has taken control of the town! Darkness prevails!'];
+      
+      if (sacrifice) {
+        winners.push('sacrifice');
+        messages.push('💀 The Sacrifice has completed their revenge from beyond!');
+      }
+
       return {
         gameOver: true,
-        winner: 'mafia',
-        message: '🔴 The Mafia has taken control of the town! Darkness prevails!',
+        winners,
+        message: messages.join('\n'),
         alivePlayers
       };
     }
 
-    // Town wins if all threats are eliminated (mafia + serial killer + sacrifice)
-    if (mafia.length === 0 && serialKiller.length === 0 && sacrifice.length === 0) {
-      return {
-        gameOver: true,
-        winner: 'town',
-        message: '🏛️ The Town has restored peace! Justice prevails!',
-        alivePlayers
-      };
-    }
+    // Town wins if all threats are eliminated (mafia + serial killer)
+    if (mafia.length === 0 && serialKiller.length === 0) {
+      let winners = ['town'];
+      let messages = ['🏛️ The Town has restored peace! Justice prevails!'];
+      
+      if (sacrifice) {
+        winners.push('sacrifice');
+        messages.push('💀 The Sacrifice has completed their revenge from beyond!');
+      }
 
-    // Special case: if only town vs sacrifice, town wins
-    if (mafia.length === 0 && serialKiller.length === 0 && town.length > 0 && sacrifice.length > 0) {
       return {
         gameOver: true,
-        winner: 'town',
-        message: '🏛️ The Town has eliminated all threats! Justice prevails!',
+        winners,
+        message: messages.join('\n'),
         alivePlayers
       };
     }
@@ -1886,6 +1908,129 @@ async function endNightPhase(code) {
   } catch (error) {
     console.error('Error resolving night phase:', error);
     io.in(code).emit('night-ended', { error: 'Failed to resolve night phase' });
+  }
+}
+
+// Helper function to handle night action completion
+async function handleNightActionCompleted(code, role, target, io) {
+  try {
+    console.log('🌙 Handling night action completed:', { code, role, target });
+    const game = await Game.findOne({ code });
+    if (!game) {
+      console.log('❌ Game not found for code:', code);
+      return;
+    }
+
+    // Get actual roles in the game - refresh this since roles might have changed
+    const actualGameRoles = game.players.map(p => p.role);
+    const rolesInGame = roleOrder.filter(r => actualGameRoles.includes(r));
+    
+    // Special case for mutilator promotion: use the original role order
+    let currentRoleIndex;
+    let nextRole;
+    
+    if (role === "mutilator" && target === "mutilator-promotion") {
+      // For mutilator promotion, the next role should be "killer" 
+      // because the mutilator was just promoted to killer and needs to act
+      console.log('🔄 Special case: mutilator promotion, next role should be killer');
+      nextRole = "killer";
+      console.log('🎯 Next role after mutilator promotion:', nextRole);
+    } else {
+      // Normal case: use current rolesInGame
+      currentRoleIndex = rolesInGame.indexOf(role);
+      if (currentRoleIndex < rolesInGame.length - 1) {
+        nextRole = rolesInGame[currentRoleIndex + 1];
+      }
+    }
+
+    console.log('📋 Current game state:', {
+      currentRole: role,
+      currentRoleIndex,
+      rolesInGame,
+      target,
+      actualGameRoles,
+      nextRole
+    });
+
+    // Broadcast completion
+    io.in(code).emit('night-action-completed', { role, target });
+    console.log('📡 Broadcasted night-action-completed:', { role, target });
+
+    // Wait 3 seconds before proceeding to next role
+    console.log('⏳ Waiting 3 seconds before next role...');
+    await new Promise(resolve => setTimeout(resolve, 3000));
+
+    if (nextRole) {
+      console.log('➡️ Moving to next role:', nextRole);
+      
+      game.currentRole = nextRole;
+      await game.save();
+      
+      const nextRolePlayer = game.players.find(p => p.role === nextRole);
+      
+      // Check if next role is a no-action role or dead player
+      let isNoActionRole = ["citizen", "mayor", "sacrifice"].includes(nextRole);
+      const isSacrificeRevenge = nextRolePlayer?.role === 'sacrifice' && 
+                                nextRolePlayer.canRevenge && 
+                                !nextRolePlayer.hasUsedRevenge;
+      
+      // Special check: if next role is mutilator and killer is dead, treat as no-action
+      const isKillerDead = !game.players.find(p => p.role === "killer" && p.alive);
+      const isMutilatorWithDeadKiller = nextRole === "mutilator" && isKillerDead;
+      
+      if (isMutilatorWithDeadKiller) {
+        console.log('🔄 Next role is mutilator but killer is dead - promoting and treating as no-action');
+        // Promote mutilator to killer
+        const mutilatorPlayer = game.players.find(p => p.role === "mutilator" && p.alive);
+        if (mutilatorPlayer) {
+          console.log('🔄 Promoting mutilator to killer:', mutilatorPlayer.username);
+          mutilatorPlayer.role = "killer";
+          await game.save();
+        }
+        isNoActionRole = true;
+      }
+      
+      console.log('🎭 Next role details:', {
+        role: nextRole,
+        player: nextRolePlayer?.username,
+        isAlive: nextRolePlayer?.alive,
+        isNoActionRole,
+        isSacrificeRevenge,
+        isMutilatorWithDeadKiller
+      });
+      
+      // Always show role message for 5 seconds, regardless of player status
+      io.in(code).emit('night-action-started', { 
+        role: nextRole,
+        isDead: !nextRolePlayer?.alive && !isSacrificeRevenge,
+        isNoActionRole: isNoActionRole,
+        isSacrificeRevenge: isSacrificeRevenge,
+        narration: nextRolePlayer?.alive ? undefined : `${nextRolePlayer?.username} (${nextRole}) is no longer with us...`
+      });
+      
+      console.log('📡 Emitted night-action-started for:', nextRole);
+      
+      // If it's a no-action role or dead player (but not sacrifice revenge), wait 5 seconds then auto-proceed
+      if ((isNoActionRole || (nextRolePlayer && !nextRolePlayer.alive)) && !isSacrificeRevenge) {
+        console.log('🔄 Next role is no-action/dead, will auto-complete in 5 seconds');
+        setTimeout(async () => {
+          const updatedGame = await Game.findOne({ code });
+          if (updatedGame && updatedGame.currentRole === nextRole) {
+            console.log('🔄 Auto-completing no-action role:', nextRole);
+            const autoTarget = isMutilatorWithDeadKiller ? "mutilator-promotion" : "no-action";
+            // Only auto-complete if the role hasn't changed
+            await handleNightActionCompleted(code, nextRole, autoTarget, io);
+          }
+        }, 5000);
+      } else {
+        console.log('✋ Next role requires player action, waiting for input');
+      }
+    } else {
+      console.log('🌅 All roles completed, ending night phase');
+      await endNightPhase(code);
+    }
+  } catch (error) {
+    console.error('❌ Error handling night action completion:', error);
   }
 }
 

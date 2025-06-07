@@ -93,11 +93,32 @@ export async function resolveNightActions(code) {
         const doctor = playersMap[a.actorId];
         if (doctor) {
           doctor.healedSelf = true;
+          // Remove any mutes from the doctor when self-healing
+          if (mutes.has(a.actorId)) {
+            console.log('🏥 Doctor removing mute from self after self-heal');
+            mutes.delete(a.actorId);
+            // Also remove mute from the actual player object
+            const gamePlayer = game.players.find(player => player.id === a.actorId);
+            if (gamePlayer) {
+              gamePlayer.muted = null;
+            }
+          }
           console.log('Doctor used self-heal');
         }
         a.result = `Doctor healed themselves (one-time use)`;
       } else {
-        a.result = `Healed ${playersMap[a.targetId]?.username}`;
+        const target = playersMap[a.targetId];
+        // Remove any mutes from the healed player
+        if (target && mutes.has(a.targetId)) {
+          console.log('🏥 Doctor removing mute from healed player:', target.username);
+          mutes.delete(a.targetId);
+          // Also remove mute from the actual player object
+          const gamePlayer = game.players.find(player => player.id === a.targetId);
+          if (gamePlayer) {
+            gamePlayer.muted = null;
+          }
+        }
+        a.result = `Healed ${target?.username}`;
       }
     } else {
       a.resolved = true;
@@ -117,8 +138,27 @@ export async function resolveNightActions(code) {
     }
   });
 
-  // 6. Sacrifice (no night action, but processes during day)
-  // Sacrifice doesn't have night actions
+  // 6. Sacrifice revenge (after being eliminated)
+  actions.filter(a => a.action === 'revenge').forEach(a => {
+    if (!blocks.has(a.actorId)) {
+      const target = playersMap[a.targetId];
+      deaths.add(a.targetId);
+      a.resolved = true;
+      a.result = `Killed ${target?.username} (Sacrifice's revenge)`;
+      
+      // Mark the Sacrifice as having used their revenge
+      const sacrifice = playersMap[a.actorId];
+      if (sacrifice) {
+        const gamePlayer = game.players.find(player => player.id === a.actorId);
+        if (gamePlayer) {
+          gamePlayer.hasUsedRevenge = true;
+        }
+      }
+    } else {
+      a.resolved = true;
+      a.result = 'Blocked by Queen';
+    }
+  });
 
   // 7. Policeman shoots (from round 2+)
   actions.filter(a => a.action === 'shoot').forEach(a => {
@@ -130,6 +170,7 @@ export async function resolveNightActions(code) {
     
     if (!blocks.has(a.actorId)) {
       const target = playersMap[a.targetId];
+      console.log('🔫 Policeman shooting:', { target: target?.username, round: currentRound });
       deaths.add(a.targetId);
       a.resolved = true;
       a.result = `Shot ${target?.username}`;
@@ -137,8 +178,18 @@ export async function resolveNightActions(code) {
       // Check if target is innocent (not mafia or serial killer)
       if (!['killer', 'mutilator', 'serial-killer'].includes(target?.role)) {
         // Policeman will die next round from broken heart
-        policemanDeaths.add(a.actorId);
-        console.log('Policeman shot innocent - will die next round');
+        const policeman = playersMap[a.actorId];
+        if (policeman) {
+          // Find the actual player in the game's players array
+          const gamePlayer = game.players.find(player => player.id === a.actorId);
+          if (gamePlayer) {
+            // Mark them for death next round
+            if (!gamePlayer.dieNextRound) {
+              gamePlayer.dieNextRound = true;
+              console.log('👮 Policeman shot innocent - will die next round:', policeman.username);
+            }
+          }
+        }
       }
     } else {
       a.resolved = true;
@@ -188,6 +239,7 @@ export async function resolveNightActions(code) {
   // 10. Mayor and 11. Citizen have no night actions
 
   // Apply deaths (but save those healed)
+  console.log('💀 Processing deaths:', { deaths: Array.from(deaths), heals: Array.from(heals) });
   const actualDeaths = [];
   const playersWithWills = [];
   const playersWithoutWills = [];
@@ -196,31 +248,51 @@ export async function resolveNightActions(code) {
     if (!heals.has(id)) {
       const p = playersMap[id];
       if (p) {
-        p.alive = false;
-        actualDeaths.push(p.username);
-        
-        // Check if player should have a will
-        let hasWill = true;
-        
-        // Exception 1: Queen who visited Serial Killer (bloody will = no testament)
-        const queenAction = actions.find(a => a.action === 'block' && a.actorId === id);
-        if (queenAction && p.role === 'queen') {
-          const target = playersMap[queenAction.targetId];
-          if (target?.role === 'serial-killer') {
-            hasWill = false; // Bloody will - no testament
+        // Find the actual player in the game's players array and update their status
+        const gamePlayer = game.players.find(player => player.id === id);
+        if (gamePlayer) {
+          console.log('☠️ Marking player as dead:', { 
+            username: p.username, 
+            role: p.role,
+            wasAlive: gamePlayer.alive 
+          });
+          
+          // Special handling for Sacrifice
+          if (gamePlayer.role === 'sacrifice' && !gamePlayer.hasUsedRevenge) {
+            // If this is the first time Sacrifice dies, mark them for revenge next round
+            gamePlayer.canRevenge = true;
+            gamePlayer.alive = false; // They're dead but will get one more action
+            console.log('🗡️ Sacrifice marked for revenge next round');
+          } else {
+            gamePlayer.alive = false;
           }
-        }
-        
-        // Exception 2: Player who was chat-muted cannot write testament
-        const muteInfo = mutes.get(id);
-        if (muteInfo && muteInfo.type === 'chat') {
-          hasWill = false;
-        }
-        
-        if (hasWill) {
-          playersWithWills.push(p.username);
-        } else {
-          playersWithoutWills.push(p.username);
+          
+          p.alive = false; // Keep playersMap in sync
+          actualDeaths.push(p.username);
+          
+          // Check if player should have a will
+          let hasWill = true;
+          
+          // Exception 1: Queen who visited Serial Killer (bloody will = no testament)
+          const queenAction = actions.find(a => a.action === 'block' && a.actorId === id);
+          if (queenAction && p.role === 'queen') {
+            const target = playersMap[queenAction.targetId];
+            if (target?.role === 'serial-killer') {
+              hasWill = false; // Bloody will - no testament
+            }
+          }
+          
+          // Exception 2: Player who was chat-muted cannot write testament
+          const muteInfo = mutes.get(id);
+          if (muteInfo && muteInfo.type === 'chat') {
+            hasWill = false;
+          }
+          
+          if (hasWill) {
+            playersWithWills.push(p.username);
+          } else {
+            playersWithoutWills.push(p.username);
+          }
         }
       }
     }
@@ -245,17 +317,46 @@ export async function resolveNightActions(code) {
   if (killerDied) {
     const mutilator = game.players.find(p => p.role === 'mutilator' && p.alive);
     if (mutilator) {
+      console.log('Mutilator being promoted to Killer');
       mutilator.role = 'killer';
+      // Update the role in the playersMap as well
+      playersMap[mutilator.id].role = 'killer';
       console.log('Mutilator promoted to Killer');
     }
   }
 
-  // Handle policeman broken heart deaths (for next round)
-  // This would need to be stored and processed in the next round
+  // Check for players marked to die this round from previous actions
+  game.players.forEach(player => {
+    if (player.dieNextRound) {
+      console.log('💔 Policeman dying from broken heart:', player.username);
+      // Mark as dead but keep in survivors list until next round
+      player.alive = false;
+      player.dieNextRound = false; // Reset the flag
+      actualDeaths.push(player.username);
+      // Always give testament to policeman who dies from broken heart
+      playersWithWills.push(player.username);
+      console.log('👮 Policeman can write testament before dying');
+    }
+  });
 
   // Update game state
   game.phase = 'day';
   game.round = currentRound + 1;
+
+  // Get list of survivors for game over check
+  const survivors = game.players.filter(p => p.alive || p.dieNextRound); // Include players marked to die next round
+  console.log('Current survivors:', survivors.map(p => ({ username: p.username, role: p.role })));
+
+  // Check win conditions
+  let gameOver = false;
+  let gameOverMessage = '';
+  let winner = '';
+
+  // Count alive players by faction
+  const aliveMafia = survivors.filter(p => ['killer', 'mutilator'].includes(p.role)).length;
+  const aliveSerialKiller = survivors.filter(p => p.role === 'serial-killer').length;
+  const aliveTown = survivors.filter(p => !['killer', 'mutilator', 'serial-killer'].includes(p.role)).length;
+
   await game.save();
 
   // Return results for client
