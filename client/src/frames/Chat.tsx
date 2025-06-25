@@ -29,6 +29,8 @@ interface Player {
   role: string;
   alive: boolean;
   muted?: string;
+  isSpectator?: boolean;
+  willBecomeSpectator?: boolean;
 }
 
 interface GameState {
@@ -99,6 +101,7 @@ export default function Chat() {
   const isAlive = currentPlayer?.alive ?? true;
   const isDead = !isAlive;
   const isDeadViewer = isDead && hasWrittenTestament;
+  const isSacrificeSpectator = currentPlayer?.isSpectator ?? false;
   
   // Check if current user is muted
   const isMuted = (() => {
@@ -229,12 +232,28 @@ export default function Chat() {
       navigate("/vote");
     };
 
+    const handlePlayerStatusUpdated = (data: { playerId: string, username: string, willBecomeSpectator?: boolean, isSpectator?: boolean }) => {
+      console.log('🔄 Player status updated in chat:', data);
+      setPlayers(prevPlayers => 
+        prevPlayers.map(player => 
+          player.id === data.playerId 
+            ? { 
+                ...player, 
+                willBecomeSpectator: data.willBecomeSpectator ?? player.willBecomeSpectator,
+                isSpectator: data.isSpectator ?? player.isSpectator
+              }
+            : player
+        )
+      );
+    };
+
     // Register socket event listeners
     socket.on('chat-state-sync', handleChatStateSync);
     socket.on('chat-state-updated', handleChatStateUpdated);
     socket.on('chat-message', handleChatMessage);
     socket.on('vote-to-proceed', handleVoteToProceed);
     socket.on('proceed-to-voting', handleProceedToVoting);
+    socket.on('player-status-updated', handlePlayerStatusUpdated);
 
     // Cleanup function
     return () => {
@@ -243,6 +262,7 @@ export default function Chat() {
       socket.off('chat-message', handleChatMessage);
       socket.off('vote-to-proceed', handleVoteToProceed);
       socket.off('proceed-to-voting', handleProceedToVoting);
+      socket.off('player-status-updated', handlePlayerStatusUpdated);
     };
   }, [lobbyCode, navigate, username]);
 
@@ -433,6 +453,7 @@ export default function Chat() {
   // Determine if user can send messages
   const canSend = () => {
     if (isDeadViewer) return false;
+    if (isSacrificeSpectator) return false; // Sacrifice spectators cannot participate in chat
     if (isMuted && currentPhase !== 'testaments') return false;
     
     switch (currentPhase) {
@@ -460,6 +481,7 @@ export default function Chat() {
   const getInputPlaceholder = () => {
     if (!canSend()) {
       if (isDeadViewer) return "You are a dead viewer...";
+      if (isSacrificeSpectator) return "You are spectating the game...";
       if (isMuted) return "You are silenced...";
       return "You cannot speak now...";
     }
@@ -484,7 +506,7 @@ export default function Chat() {
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
-  const alivePlayers = players.filter(p => p.alive);
+  const alivePlayers = players.filter(p => p.alive && !p.isSpectator && !p.willBecomeSpectator);
   const allVotedToProceed = voteToProceed.size >= alivePlayers.length;
 
   // Add friend status tracking

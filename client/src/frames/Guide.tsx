@@ -12,7 +12,7 @@ export default function Guide() {
       <button className="guide-back" onClick={() => navigate("/menu")}>⟵ Back</button>
 
       <div className="guide-content">
-        <h1 className="guide-title">🎮 Game Guide</h1>
+        <h1 className="guide-title">Game Guide</h1>
         <div className="guide-grid">
           <div className="guide-row">
             <h2>👑 Queen (Q)</h2>

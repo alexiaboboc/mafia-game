@@ -20,6 +20,8 @@ interface Player {
   role: string;
   alive: boolean;
   muted?: string;
+  isSpectator?: boolean;
+  willBecomeSpectator?: boolean;
 }
 
 interface VoteResult {
@@ -65,6 +67,7 @@ export default function VotingFrame() {
   const currentPlayer = players.find(p => p.username === username);
   const isAlive = currentPlayer?.alive ?? true;
   const isEliminated = eliminatedPlayer === username;
+  const isSacrificeSpectator = currentPlayer?.isSpectator ?? false;
   
   // Check if player is vote-muted
   const isVoteMuted = currentPlayer?.muted === 'vote';
@@ -224,6 +227,21 @@ export default function VotingFrame() {
       }
     };
 
+    const handlePlayerStatusUpdated = (data: { playerId: string, username: string, willBecomeSpectator?: boolean, isSpectator?: boolean }) => {
+      console.log('🔄 Player status updated in voting:', data);
+      setPlayers(prevPlayers => 
+        prevPlayers.map(player => 
+          player.id === data.playerId 
+            ? { 
+                ...player, 
+                willBecomeSpectator: data.willBecomeSpectator ?? player.willBecomeSpectator,
+                isSpectator: data.isSpectator ?? player.isSpectator
+              }
+            : player
+        )
+      );
+    };
+
     console.log('🔌 Setting up socket listeners for voting');
 
     // Register socket event listeners
@@ -233,6 +251,7 @@ export default function VotingFrame() {
     socket.on('next-round', handleNextRound);
     socket.on('testament-received', handleTestamentReceived);
     socket.on('voting-state-sync', handleVotingStateSync);
+    socket.on('player-status-updated', handlePlayerStatusUpdated);
 
     return () => {
       console.log('🔌 Cleaning up socket listeners for voting');
@@ -242,6 +261,7 @@ export default function VotingFrame() {
       socket.off('next-round', handleNextRound);
       socket.off('testament-received', handleTestamentReceived);
       socket.off('voting-state-sync', handleVotingStateSync);
+      socket.off('player-status-updated', handlePlayerStatusUpdated);
     };
   }, [lobbyCode, navigate, username]);
 
@@ -290,7 +310,7 @@ export default function VotingFrame() {
   };
 
   const handleSubmitVote = () => {
-    if (hasVoted || !isAlive || isVoteMuted) return;
+    if (hasVoted || !isAlive || isVoteMuted || isSacrificeSpectator) return;
     
     console.log(`🗳️ Submitting vote: ${selectedPlayer || 'abstain'}`);
     setHasVoted(true);
@@ -314,8 +334,8 @@ export default function VotingFrame() {
       message: testamentMessage.trim()
     });
 
-    // If this is the eliminated player, redirect to main menu after submitting testament
-    if (isEliminated) {
+    // If this is the eliminated player and NOT sacrifice, redirect to main menu after submitting testament
+    if (isEliminated && currentPlayer?.role !== 'sacrifice') {
       setTimeout(() => {
         navigate("/");
       }, 3000);
@@ -331,8 +351,8 @@ export default function VotingFrame() {
         message: null // No testament
       });
 
-      // If this is the eliminated player, redirect to main menu
-      if (isEliminated) {
+      // If this is the eliminated player and NOT sacrifice, redirect to main menu
+      if (isEliminated && currentPlayer?.role !== 'sacrifice') {
         setTimeout(() => {
           navigate("/");
         }, 3000);
@@ -351,7 +371,7 @@ export default function VotingFrame() {
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
-  const alivePlayers = players.filter(p => p.alive);
+  const alivePlayers = players.filter(p => p.alive && !p.isSpectator && !p.willBecomeSpectator);
   const votablePlayers = alivePlayers.filter(p => p.username !== username);
 
   // Render different phases
@@ -364,13 +384,15 @@ export default function VotingFrame() {
           <p className="voting-instruction">
             {!isAlive 
               ? "You are dead and cannot participate in voting." 
+              : isSacrificeSpectator
+                ? "You are spectating the game and cannot participate in voting."
               : isVoteMuted 
                 ? "You are vote-silenced and cannot participate." 
                 : "Choose someone you suspect. Majority decides the fate."
             }
           </p>
 
-          {isAlive && !isVoteMuted ? (
+          {isAlive && !isVoteMuted && !isSacrificeSpectator ? (
             <div className="voting-section">
               <div className="voting-grid">
                 {votablePlayers.map((player, i) => (
@@ -406,7 +428,12 @@ export default function VotingFrame() {
             </div>
           ) : (
             <div className="voting-spectator">
-              {!isAlive ? "You are dead and cannot vote." : "You cannot vote this round."}
+              {!isAlive 
+                ? "You are dead and cannot vote." 
+                : isSacrificeSpectator 
+                  ? "You are spectating and cannot vote." 
+                  : "You cannot vote this round."
+              }
             </div>
           )}
 

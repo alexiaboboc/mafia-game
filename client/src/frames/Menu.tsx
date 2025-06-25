@@ -63,9 +63,6 @@ export default function Menu() {
           <button className="menu-button" onClick={handleNewGame}>
             New Game
           </button>
-          <button className="menu-button" onClick={() => navigate("/options")}>
-            Options
-          </button>
           <button className="menu-button" onClick={() => navigate("/guide")}>
             Guide
           </button>

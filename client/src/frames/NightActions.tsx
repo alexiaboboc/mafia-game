@@ -76,7 +76,7 @@ const roleDescriptions: Record<string, string> = {
   doctor: "The doctor is choosing who to heal and save from death (healing also removes silence)...",
   "serial-killer": "The serial killer is picking their victim for tonight...",
   sacrifice: "The sacrifice is resting, waiting for the town's judgment...",
-  "sacrifice-revenge": "The sacrifice is choosing their final victim...",
+  "sacrifice-revenge": "The sacrifice is resting, waiting for the town's judgment...",
   policeman: "The policeman is taking aim at a suspect...",
   "policeman-dying": "The policeman is dying from a broken heart...",
   sheriff: "The sheriff is investigating someone's allegiance...",
@@ -103,7 +103,7 @@ const yourTurnMessages: Record<string, string> = {
 
 const actionRoles = [
   "queen", "killer", "mutilator", "doctor", "serial-killer",
-  "policeman", "sheriff", "lookout"
+  "policeman", "sheriff", "lookout", "sacrifice"
 ];
 
 const actionMap: Record<string, string> = {
@@ -126,6 +126,10 @@ interface Player {
   muted?: boolean;
   healedSelf?: boolean; // Track if doctor has used self-heal
   dieNextRound?: boolean; // Track if policeman is dying from broken heart
+  isSpectator?: boolean; // Track if player is spectating (like sacrifice after elimination)
+  canRevenge?: boolean; // Track if sacrifice can take revenge
+  hasUsedRevenge?: boolean; // Track if sacrifice has used their revenge
+  willBecomeSpectator?: boolean; // Track if sacrifice is marked to become spectator after testament
 }
 
 interface NightResult {
@@ -249,8 +253,8 @@ export default function NightActions() {
         // Check if current player is dead
         const currentPlayer = data.players.find((p: Player) => p.id === playerId);
         if (currentPlayer) {
-          // Only set as dead if actually dead, not if marked to die next round
-          setIsDead(!currentPlayer.alive && !currentPlayer.dieNextRound);
+          // Only set as dead if actually dead, not if marked to die next round, and not if spectator
+          setIsDead(!currentPlayer.alive && !currentPlayer.dieNextRound && !currentPlayer.isSpectator);
           if (!currentRole) {
             sessionStorage.setItem("role", currentPlayer.role);
             window.location.reload(); // Reload to get the role
@@ -290,9 +294,9 @@ export default function NightActions() {
       }, 1000);
     };
 
-    const handleNightActionStarted = ({ role, isDead, isPromoted, narration, isNoActionRole, isSacrificeRevenge }: any) => {
+    const handleNightActionStarted = ({ role, isDead, isPromoted, narration, isNoActionRole, isSacrificeRevenge, isPolicemanDying: serverPolicemanDying }: any) => {
       console.log('🌙 Night action started event received:', { 
-        role, isDead, isPromoted, narration, isNoActionRole, isSacrificeRevenge 
+        role, isDead, isPromoted, narration, isNoActionRole, isSacrificeRevenge, serverPolicemanDying 
       });
       console.log('🎭 Current client state:', {
         currentRole,
@@ -358,9 +362,10 @@ export default function NightActions() {
         }
       }
 
-      // Check if current player is policeman dying from broken heart
+      // Check if current player is policeman dying from broken heart (server flag or local calculation)
       const currentPlayer = players.find(p => p.id === playerId);
-      const isPolicemanDying = currentPlayer?.role === "policeman" && currentPlayer.dieNextRound;
+      const localPolicemanDying = currentPlayer?.role === "policeman" && currentPlayer.dieNextRound;
+      const isPolicemanDying = serverPolicemanDying || localPolicemanDying;
       
       // If this is a dead player's turn, a role without night action, or policeman dying, show their role description and auto-complete
       if ((isDead && !isSacrificeRevenge) || isNoActionRole || isPolicemanDying) {
@@ -395,8 +400,8 @@ export default function NightActions() {
       
       // Check if current player is dead
       const currentPlayer = players.find(p => p.id === playerId);
-      if (currentPlayer && !currentPlayer.alive) {
-        // If player is dead, redirect to main menu after showing results
+      if (currentPlayer && !currentPlayer.alive && !currentPlayer.isSpectator) {
+        // If player is dead and not a spectator (like sacrifice), redirect to main menu after showing results
         setTimeout(() => {
           navigate("/");
         }, 5000);
@@ -438,12 +443,28 @@ export default function NightActions() {
       }, 5000);
     };
 
+    const handlePlayerStatusUpdated = (data: { playerId: string, username: string, willBecomeSpectator?: boolean, isSpectator?: boolean }) => {
+      console.log('🔄 Player status updated:', data);
+      setPlayers(prevPlayers => 
+        prevPlayers.map(player => 
+          player.id === data.playerId 
+            ? { 
+                ...player, 
+                willBecomeSpectator: data.willBecomeSpectator ?? player.willBecomeSpectator,
+                isSpectator: data.isSpectator ?? player.isSpectator
+              }
+            : player
+        )
+      );
+    };
+
     // Register socket event listeners
     socket.on('game-started', handleGameStarted);
     socket.on('night-action-started', handleNightActionStarted);
     socket.on('night-action-completed', handleNightActionCompleted);
     socket.on('night-ended', handleNightEnded);
     socket.on('game-over', handleGameOver);
+    socket.on('player-status-updated', handlePlayerStatusUpdated);
 
     // Cleanup function
     return () => {
@@ -452,6 +473,7 @@ export default function NightActions() {
       socket.off('night-action-completed', handleNightActionCompleted);
       socket.off('night-ended', handleNightEnded);
       socket.off('game-over', handleGameOver);
+      socket.off('player-status-updated', handlePlayerStatusUpdated);
     };
   }, [lobbyCode, navigate, rolesInGame, players, playerId]);
 
@@ -549,24 +571,21 @@ export default function NightActions() {
       }
       return res.json();
     })
-    .then(() => {
+    .then((data) => {
       console.log('Action sent to server, emitting completion');
       
       // For Lookout and Sheriff, show immediate result
       if (currentRole === "lookout") {
-        // Get current round's actions for the target
-        const currentRound = gameRound;
-        const targetPlayer = players.find(p => p.username === targetUsername);
-        if (targetPlayer) {
-          const visitors = players.filter(p => 
-            p.id !== playerId && // Exclude lookout
-            p.id !== targetPlayer.id && // Exclude target
-            p.alive // Only alive players
-          ).map(p => p.username);
-          
-          setActionCompleted(`${targetUsername} - ${visitors.length > 0 ? visitors.join(", ") : "No visitors"}`);
+        // For lookout, show immediate result with visited players
+        console.log('Lookout action - targetUsername:', targetUsername);
+        console.log('Lookout result from server:', data.lookoutResult);
+        
+        if (data.lookoutResult) {
+          const { watchedPlayer, visitedPlayers } = data.lookoutResult;
+          const visitedList = visitedPlayers.length > 0 ? visitedPlayers.join(", ") : "No one";
+          setActionCompleted(`${watchedPlayer} - Visited: ${visitedList}`);
         } else {
-          setActionCompleted(targetUsername);
+          setActionCompleted(`${targetUsername} - Watching`);
         }
         
         // Wait 3 seconds before proceeding to next role
@@ -709,9 +728,18 @@ export default function NightActions() {
 
     // Special handling for Lookout and Sheriff
     if (role === "lookout") {
-      // Extract visitors from target string (format: "username - visitor1, visitor2")
-      const [username, visitors] = target.split(" - ");
-      return `You are watching ${username}...\nVisitors: ${visitors}`;
+      // Show personalized message only if this is the lookout's own action
+      if (sessionStorage.getItem("role") === "lookout" && target && target.includes(" - ")) {
+        const [username, result] = target.split(" - ");
+        if (result === "Watching") {
+          return `You are watching ${username}...`;
+        } else if (result.startsWith("Visited:")) {
+          const visited = result.replace("Visited: ", "");
+          return `You are watching ${username}...\nThey visited: ${visited}`;
+        }
+      }
+      // For other players or invalid target, show standard description
+      return roleDescriptions["lookout"];
     }
     if (role === "sheriff") {
       // Only show result to the sheriff
@@ -809,15 +837,7 @@ export default function NightActions() {
       }
     }
 
-    // Show lookout results only to the Lookout
-    if (currentPlayerRole === "lookout" && lookoutResults && Object.keys(lookoutResults).length > 0) {
-      const currentPlayerUsername = sessionStorage.getItem("username");
-      if (currentPlayerUsername && lookoutResults[currentPlayerUsername]) {
-        const myVisitors = lookoutResults[currentPlayerUsername];
-        const visitorList = Array.isArray(myVisitors) && myVisitors.length > 0 ? myVisitors.join(", ") : "No visitors";
-        message += `\n👁️ You saw: ${visitorList}`;
-      }
-    }
+    // Lookout results are now shown in real-time, no need to show them here
 
     return message;
   };
@@ -825,20 +845,52 @@ export default function NightActions() {
   // Determine what to show
   const isMyTurn = (activeRole === currentRole && actionRoles.includes(currentRole) && !hasActed && !isDead) ||
                    // Special case: if activeRole is "killer" and current player was promoted from mutilator to killer
-                   (activeRole === "killer" && currentRole === "killer" && sessionStorage.getItem("role") === "killer" && !hasActed && !isDead);
+                   (activeRole === "killer" && currentRole === "killer" && sessionStorage.getItem("role") === "killer" && !hasActed && !isDead) ||
+                   // Special case: sacrifice with revenge
+                   (activeRole === "sacrifice" && currentRole === "sacrifice" && !hasActed);
   const alivePlayers = players.filter(p => {
     // Include players who are alive OR marked to die next round (policeman)
-    return (p.alive || p.dieNextRound) && p.username !== username;
+    // But exclude spectators (like sacrifice after elimination) AND sacrifice marked to become spectator
+    const shouldInclude = (p.alive || p.dieNextRound) && 
+                         p.username !== username && 
+                         !p.isSpectator && 
+                         !p.willBecomeSpectator;
+    
+    // Debug logging for sacrifice
+    if (p.role === 'sacrifice') {
+      console.log('🗡️ SACRIFICE TARGET FILTER:', {
+        username: p.username,
+        alive: p.alive,
+        isSpectator: p.isSpectator,
+        willBecomeSpectator: p.willBecomeSpectator,
+        shouldInclude
+      });
+    }
+    
+    return shouldInclude;
   });
   
   // Special case: Policeman cannot act in round 1
   const canActuallyAct = currentRole !== "policeman" || gameRound >= 2;
   
+  // Check if sacrifice has revenge available
+  const currentPlayer = players.find(p => p.id === playerId);
+  const isSacrificeWithRevenge = currentRole === "sacrifice" && 
+                                 currentPlayer?.canRevenge && 
+                                 !currentPlayer?.hasUsedRevenge;
+  
+  // Sacrifice without revenge acts like policeman in round 1 - show continue button only
+  const canActuallySelectTarget = canActuallyAct && 
+                                  (currentRole !== "sacrifice" || isSacrificeWithRevenge);
+  
   // Additional validation to prevent inconsistent states
-  const shouldShowAction = isMyTurn && canActuallyAct && rolesInGame.includes(currentRole) && !isDead;
+  const shouldShowAction = isMyTurn && canActuallySelectTarget && rolesInGame.includes(currentRole) && !isDead;
   
   // Policeman specific validation - force no action in round 1
   const isPolicemanRound1 = currentRole === "policeman" && gameRound < 2;
+  
+  // Sacrifice without revenge - force no target selection
+  const isSacrificeNoRevenge = currentRole === "sacrifice" && !isSacrificeWithRevenge;
 
   console.log('Render state:', {
     activeRole,
@@ -851,8 +903,11 @@ export default function NightActions() {
     alivePlayersCount: alivePlayers.length,
     gameRound,
     canActuallyAct,
+    canActuallySelectTarget,
     shouldShowAction,
     isPolicemanRound1,
+    isSacrificeNoRevenge,
+    isSacrificeWithRevenge,
     rolesInGame,
     isDead
   });
@@ -943,7 +998,7 @@ export default function NightActions() {
                 src={`/cards/${currentRole}.png`}
                 alt={currentRole.replace("-", " ")}
               />
-              {shouldShowAction && !isPolicemanRound1 ? (
+              {shouldShowAction && !isPolicemanRound1 && !isSacrificeNoRevenge ? (
                 currentRole === "mutilator" && selectedTarget ? (
                   <div className="mutilator-choice">
                     <p>You selected: <strong>{selectedTarget}</strong></p>
@@ -1014,7 +1069,9 @@ export default function NightActions() {
                   <p>
                     {isPolicemanRound1 
                       ? "You cannot shoot until round 2. Rest and wait." 
-                      : "You have no night action. Rest well."
+                      : isSacrificeNoRevenge
+                        ? "You have no action. Wait for the town's judgment."
+                        : "You have no night action. Rest well."
                     }
                   </p>
                   <button 

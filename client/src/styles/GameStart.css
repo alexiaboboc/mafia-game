@@ -58,7 +58,7 @@
 }
 
 .game-start-role-card img {
-  width: 130px;
+  width: 110px;
   height: auto;
   border-radius: 8px;
   margin-bottom: 0.3rem;
@@ -155,7 +155,7 @@
     }
   
     .game-start-role-card img {
-      width: 100px;
+      width: 75px;
     }
   
     .game-start-role-description {
@@ -180,7 +180,7 @@
     }
   
     .game-start-role-card img {
-      width: 85px;
+      width: 65px;
     }
   
     .game-start-your-card img {
