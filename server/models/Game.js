@@ -11,7 +11,9 @@ const PlayerSchema = new mongoose.Schema({
   dieNextRound: { type: Boolean, default: false }, // Track players who will die next round
   canRevenge: { type: Boolean, default: false }, // Track if Sacrifice can use revenge
   hasUsedRevenge: { type: Boolean, default: false }, // Track if Sacrifice has used revenge
-  isSpectator: { type: Boolean, default: false } // Track if player is a spectator (like Sacrifice after revenge)
+  isSpectator: { type: Boolean, default: false }, // Track if player is a spectator (like Sacrifice after revenge)
+  hasUsedTripleVote: { type: Boolean, default: false }, // Track if Mayor has used triple vote
+  mayorRevealed: { type: Boolean, default: false } // Track if Mayor has been revealed to everyone
 });
 
 const GameSchema = new mongoose.Schema({

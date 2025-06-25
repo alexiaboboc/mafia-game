@@ -1361,6 +1361,113 @@ io.on('connection', socket => {
     }
   });
 
+  socket.on('cast-triple-vote', async ({ code, vote, username }) => {
+    try {
+      console.log('Triple vote cast by mayor:', { code, vote, username });
+      
+      const game = await Game.findOne({ code });
+      if (!game) {
+        console.log('Game not found for code:', code);
+        return;
+      }
+
+      const voter = game.players.find(p => p.username === username);
+      if (!voter || !voter.alive || voter.isSpectator) {
+        console.log('Invalid voter, voter is dead, or is spectator');
+        return;
+      }
+
+      // Check if voter is actually mayor
+      if (voter.role !== 'mayor') {
+        console.log('Non-mayor trying to cast triple vote');
+        return;
+      }
+
+      // Check if mayor already used triple vote
+      if (voter.hasUsedTripleVote) {
+        console.log('Mayor already used triple vote');
+        return;
+      }
+
+      // Check if voter is vote-muted
+      if (voter.muted === 'vote') {
+        console.log('Voter is vote-muted');
+        return;
+      }
+
+      // Initialize voting state if not exists
+      if (!game.votingState) {
+        const startTime = new Date();
+        game.votingState = {
+          votes: new Map(),
+          timeLeft: 60,
+          startTime: startTime
+        };
+        game.voteTimerStarted = false;
+        
+        console.log('🆕 Initialized voting state in cast-triple-vote:', {
+          startTime: startTime.toISOString(),
+          timeLeft: 60,
+          gameCode: code
+        });
+      }
+
+      // Mark mayor as having used triple vote and revealed
+      voter.hasUsedTripleVote = true;
+      voter.mayorRevealed = true;
+
+      // Record the triple vote (stored as special format to distinguish)
+      game.votingState.votes.set(voter.username, `TRIPLE:${vote}`);
+      await game.save();
+
+      // Calculate actual time left only if startTime exists
+      let actualTimeLeft = game.votingState.timeLeft;
+      if (game.votingState.startTime) {
+        const now = Date.now();
+        const startTime = game.votingState.startTime.getTime();
+        const elapsedTime = Math.floor((now - startTime) / 1000);
+        actualTimeLeft = Math.max(0, game.votingState.timeLeft - elapsedTime);
+      }
+
+      // Convert Map to Object for transmission
+      const votesObject = Object.fromEntries(game.votingState.votes);
+
+      // Broadcast mayor reveal and vote update
+      io.in(code).emit('mayor-revealed', {
+        mayorUsername: username,
+        vote: vote,
+        isTripleVote: true
+      });
+
+      io.in(code).emit('vote-update', {
+        votes: votesObject,
+        timeLeft: actualTimeLeft
+      });
+
+      // Check if all alive, non-muted, non-spectator players have voted
+      const eligibleVoters = game.players.filter(p => p.alive && p.muted !== 'vote' && !p.isSpectator);
+      const votedPlayers = Array.from(game.votingState.votes.keys());
+      
+      console.log('🗳️ Triple vote check details:', {
+        eligibleVoters: eligibleVoters.map(p => p.username),
+        votedPlayers: votedPlayers,
+        eligibleCount: eligibleVoters.length,
+        votedCount: votedPlayers.length,
+        shouldEndVoting: votedPlayers.length >= eligibleVoters.length
+      });
+
+      // If all eligible players have voted, end voting immediately
+      if (votedPlayers.length >= eligibleVoters.length) {
+        console.log('⚠️ All eligible players have voted (including triple vote), ending voting immediately');
+        await endVotingPhase(code);
+      }
+
+      console.log('Triple vote recorded and broadcasted');
+    } catch (error) {
+      console.error('Error casting triple vote:', error);
+    }
+  });
+
   socket.on('cast-vote', async ({ code, vote, username }) => {
     try {
       console.log('Vote cast:', { code, vote, username });
@@ -1581,14 +1688,22 @@ async function endVotingPhase(code) {
     console.log('📊 Ending voting phase with votes:', votes);
     console.log('👥 Alive players:', alivePlayers.map(p => p.username));
     
-    // Count votes
+    // Count votes (including triple votes)
     const voteCounts = {};
     let totalVotes = 0;
     
-    Object.values(votes).forEach(vote => {
+    Object.entries(votes).forEach(([voter, vote]) => {
       if (vote && vote !== 'abstain') {
-        voteCounts[vote] = (voteCounts[vote] || 0) + 1;
-        totalVotes++;
+        // Check if this is a triple vote from mayor
+        if (vote.startsWith('TRIPLE:')) {
+          const actualVote = vote.replace('TRIPLE:', '');
+          voteCounts[actualVote] = (voteCounts[actualVote] || 0) + 3; // Count as 3 votes
+          totalVotes += 3;
+          console.log(`🏛️ Triple vote from mayor ${voter}: ${actualVote} (counts as 3)`);
+        } else {
+          voteCounts[vote] = (voteCounts[vote] || 0) + 1;
+          totalVotes++;
+        }
       }
     });
 
