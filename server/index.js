@@ -41,6 +41,7 @@ const PORT = process.env.PORT || 5001
 const connectedClients = new Map();
 const onlineUsers = new Set();
 const userHeartbeats = new Map(); // Track last heartbeat time for each user
+const endingVotes = new Set(); // Track games currently ending voting to prevent race conditions
 
 // Helper function to check if a user is truly online
 const isUserOnline = (userId) => {
@@ -375,9 +376,44 @@ app.post('/api/game/action', async (req, res) => {
       timestamp: new Date()
     });
 
+    // Special handling for lookout - return who the target visited
+    let lookoutResult = null;
+    if (action === 'watch') {
+      // Find actions where the target (the person being watched) acted on someone else
+      const targetActions = roundHistory.nightActions.filter(a => 
+        a.actorId === targetPlayer.id && a.actorId !== actorId
+      );
+      
+      if (targetActions.length > 0) {
+        // Get the names of who the target visited
+        const visitedPlayers = targetActions.map(a => {
+          const visitedPlayer = game.players.find(p => p.id === a.targetId);
+          return visitedPlayer ? visitedPlayer.username : null;
+        }).filter(Boolean);
+        
+        lookoutResult = {
+          watchedPlayer: targetPlayer.username,
+          visitedPlayers: visitedPlayers
+        };
+      } else {
+        lookoutResult = {
+          watchedPlayer: targetPlayer.username,
+          visitedPlayers: []
+        };
+      }
+    }
+
     await game.save();
     console.log('Action recorded successfully');
-    res.json({ message: "Action recorded" });
+    
+    if (lookoutResult) {
+      res.json({ 
+        message: "Action recorded", 
+        lookoutResult 
+      });
+    } else {
+      res.json({ message: "Action recorded" });
+    }
   } catch (err) {
     console.error("Error processing action:", err);
     res.status(500).json({ error: "Server error" });
@@ -1205,19 +1241,41 @@ io.on('connection', socket => {
       if (currentPhase === 'voting') {
         // Initialize voting state if not exists
         if (!game.votingState) {
+          const startTime = new Date();
           game.votingState = {
             votes: new Map(),
             timeLeft: 60,
-            startTime: new Date()
+            startTime: startTime
           };
           game.voteTimerStarted = false;
           await game.save();
+          
+          console.log('🆕 Initialized new voting state:', {
+            startTime: startTime.toISOString(),
+            timeLeft: 60,
+            gameCode: code
+          });
         }
 
         // Calculate actual time left only if startTime exists
         if (game.votingState.startTime) {
-          const elapsedTime = Math.floor((Date.now() - game.votingState.startTime.getTime()) / 1000);
-          timeLeft = Math.max(0, game.votingState.timeLeft - elapsedTime);
+          const now = Date.now();
+          const startTime = game.votingState.startTime.getTime();
+          const elapsedTime = Math.floor((now - startTime) / 1000);
+          const originalTimeLeft = game.votingState.timeLeft;
+          timeLeft = Math.max(0, originalTimeLeft - elapsedTime);
+          
+          console.log('⏰ Voting timer calculation:', {
+            now: new Date(now).toISOString(),
+            startTime: new Date(startTime).toISOString(),
+            elapsedTime,
+            originalTimeLeft,
+            calculatedTimeLeft: timeLeft,
+            votingStateExists: !!game.votingState,
+            timerStarted: game.voteTimerStarted
+          });
+        } else {
+          console.log('⏰ No startTime found, using default timeLeft:', timeLeft);
         }
 
         // Convert Map to Object for transmission
@@ -1327,12 +1385,19 @@ io.on('connection', socket => {
 
       // Initialize voting state if not exists
       if (!game.votingState) {
+        const startTime = new Date();
         game.votingState = {
           votes: new Map(),
           timeLeft: 60,
-          startTime: new Date()
+          startTime: startTime
         };
         game.voteTimerStarted = false;
+        
+        console.log('🆕 Initialized voting state in cast-vote:', {
+          startTime: startTime.toISOString(),
+          timeLeft: 60,
+          gameCode: code
+        });
       }
 
       // Record the vote
@@ -1342,8 +1407,18 @@ io.on('connection', socket => {
       // Calculate actual time left only if startTime exists
       let actualTimeLeft = game.votingState.timeLeft;
       if (game.votingState.startTime) {
-        const elapsedTime = Math.floor((Date.now() - game.votingState.startTime.getTime()) / 1000);
+        const now = Date.now();
+        const startTime = game.votingState.startTime.getTime();
+        const elapsedTime = Math.floor((now - startTime) / 1000);
         actualTimeLeft = Math.max(0, game.votingState.timeLeft - elapsedTime);
+        
+        console.log('⏰ Timer calculation in cast-vote:', {
+          now: new Date(now).toISOString(),
+          startTime: new Date(startTime).toISOString(),
+          elapsedTime,
+          originalTimeLeft: game.votingState.timeLeft,
+          calculatedTimeLeft: actualTimeLeft
+        });
       }
 
       // Convert Map to Object for transmission
@@ -1417,8 +1492,8 @@ io.on('connection', socket => {
         await game.save();
       }
 
-      // Get count of alive players
-      const alivePlayers = game.players.filter(p => p.alive);
+      // Get count of alive players who can participate (exclude spectators)
+      const alivePlayers = game.players.filter(p => p.alive && !p.isSpectator);
       const totalVotes = game.votesToProceed.length;
       const requiredVotes = alivePlayers.length;
 
@@ -1437,7 +1512,19 @@ io.on('connection', socket => {
         // Reset votes for next phase and start voting
         game.votesToProceed = [];
         game.phase = 'voting';
+        
+        // Initialize fresh voting state
+        game.votingState = {
+          votes: new Map(),
+          timeLeft: 60,
+          startTime: new Date()
+        };
+        game.voteTimerStarted = false;
+        game.voteEnding = false;
+        
         await game.save();
+        
+        console.log('🗳️ Voting phase started with fresh state');
         
         // Redirect all players to voting
         io.in(code).emit('proceed-to-voting');
@@ -1476,13 +1563,15 @@ async function endVotingPhase(code) {
       return;
     }
 
-    // Prevent multiple executions by marking the vote as ended
-    if (game.voteEnding) {
+    // Prevent multiple executions using both game state and global tracking
+    if (game.voteEnding || endingVotes.has(code)) {
       console.log('⚠️ Voting is already ending, skipping duplicate call');
       return;
     }
     
+    // Mark voting as ending both in game state and globally
     game.voteEnding = true;
+    endingVotes.add(code);
     await game.save();
 
     const votesMap = game.votingState?.votes || new Map();
@@ -1528,24 +1617,29 @@ async function endVotingPhase(code) {
       // Mark player as dead
       const player = game.players.find(p => p.username === eliminatedPlayer);
       if (player) {
-        player.alive = false;
-        
-        // Check if sacrifice was voted out
+        // Check if sacrifice was voted out - special handling
         if (player.role === 'sacrifice') {
-          console.log('⚰️ Sacrifice was voted out - they win!');
-          // Sacrifice wins immediately
-          const gameResult = {
-            gameOver: true,
-            winner: 'sacrifice',
-            message: '⚰️ The Sacrifice has achieved their goal! They win by being voted out!',
-            alivePlayers: alivePlayers.filter(p => p.alive)
-          };
+          console.log('⚰️ Sacrifice was voted out - marked for revenge, game continues');
+          // Mark sacrifice for revenge but don't mark as dead yet
+          player.canRevenge = true;
+          player.hasWonByVoting = true; // Mark that they achieved their goal
+          // Keep them alive for testament and ghost mode, but mark as spectator-to-be
+          player.willBecomeSpectator = true; 
+          console.log('🗡️ Sacrifice stays alive for testament, will become spectator after');
           
-          game.phase = 'game-over';
+          // Broadcast updated game state so clients know sacrifice is no longer targetable
           await game.save();
-          console.log('🎮 Emitting game-over event');
-          io.in(code).emit('game-over', gameResult);
-          return;
+          console.log('📡 Broadcasting sacrifice elimination status to clients');
+          io.in(code).emit('player-status-updated', {
+            playerId: player.id,
+            username: player.username,
+            willBecomeSpectator: true
+          });
+          
+          // Don't set alive = false for sacrifice
+        } else {
+          // Normal elimination for other players
+          player.alive = false;
         }
       }
     } else if (playersWithMaxVotes.length > 1 && maxVotes > 0) {
@@ -1577,6 +1671,9 @@ async function endVotingPhase(code) {
     game.voteTimerStarted = false;
     game.voteEnding = false; // Reset the ending flag
     await game.save();
+    
+    // Remove from global tracking
+    endingVotes.delete(code);
 
     console.log('💾 Game state updated, emitting vote-ended event');
     
@@ -1653,8 +1750,22 @@ async function handleTestamentComplete(code, username, message) {
         message: message || 'No final words...',
         timestamp: new Date()
       });
-      await game.save();
     }
+    
+    // Check if this is sacrifice's testament - convert them to spectator after testament
+    const sacrificePlayer = game.players.find(p => p.username === username && p.role === 'sacrifice');
+    if (sacrificePlayer && sacrificePlayer.willBecomeSpectator) {
+      console.log('👻 Converting sacrifice to spectator after testament');
+      sacrificePlayer.isSpectator = true;
+      sacrificePlayer.willBecomeSpectator = false;
+      // Now mark as "dead" for game logic but keep as spectator for client
+      sacrificePlayer.alive = false;
+      console.log('💀 Sacrifice marked as dead but remains spectator');
+    } else {
+      // For non-sacrifice players, they were already marked dead during elimination
+    }
+    
+    await game.save();
     
     // Broadcast testament to all players
     console.log('📡 Broadcasting testament to all players');
@@ -1700,11 +1811,7 @@ async function checkGameStateAndProceed(code) {
         // Reset all phase-related state
         game.phase = 'night';
         game.chatPhase = 'testaments';
-        game.votingState = {
-          votes: new Map(),
-          timeLeft: 60,
-          startTime: new Date()
-        };
+        game.votingState = null; // Reset to null, will be initialized when voting starts
         game.voteTimerStarted = false;
         game.votesToProceed = [];
         game.lastVoteResult = null;
@@ -1748,7 +1855,7 @@ async function checkVictoryConditions(code) {
       ['queen', 'doctor', 'policeman', 'sheriff', 'lookout', 'mayor', 'citizen'].includes(p.role)
     );
     const serialKiller = alivePlayers.filter(p => p.role === 'serial-killer');
-    const sacrifice = game.players.find(p => p.role === 'sacrifice' && p.hasUsedRevenge);
+    const sacrifice = game.players.find(p => p.role === 'sacrifice' && (p.hasUsedRevenge || p.hasWonByVoting));
 
     console.log('Victory check:', {
       total: alivePlayers.length,
@@ -1813,7 +1920,7 @@ async function checkVictoryConditions(code) {
     const nonMafiaPlayers = town.length;
     if (mafia.length > 0 && mafia.length >= nonMafiaPlayers && serialKiller.length === 0) {
       let winners = ['mafia'];
-      let messages = ['🔴 The Mafia has taken control of the town! Darkness prevails!'];
+      let messages = ['The Mafia has taken control of the town! Darkness prevails!'];
       
       if (sacrifice) {
         winners.push('sacrifice');
@@ -1923,7 +2030,21 @@ async function handleNightActionCompleted(code, role, target, io) {
 
     // Get actual roles in the game - refresh this since roles might have changed
     const actualGameRoles = game.players.map(p => p.role);
-    const rolesInGame = roleOrder.filter(r => actualGameRoles.includes(r));
+    let rolesInGame = roleOrder.filter(r => actualGameRoles.includes(r));
+    
+    // Special case: force include sacrifice if they have revenge pending
+    const sacrificeWithRevenge = game.players.find(p => p.role === 'sacrifice' && p.canRevenge && !p.hasUsedRevenge);
+    if (sacrificeWithRevenge && !rolesInGame.includes('sacrifice')) {
+      // Insert sacrifice in correct position
+      const sacrificePosition = roleOrder.indexOf('sacrifice');
+      const insertIndex = rolesInGame.findIndex(role => roleOrder.indexOf(role) > sacrificePosition);
+      if (insertIndex === -1) {
+        rolesInGame.push('sacrifice');
+      } else {
+        rolesInGame.splice(insertIndex, 0, 'sacrifice');
+      }
+      console.log('🗡️ Force-added sacrifice to rolesInGame for revenge:', rolesInGame);
+    }
     
     // Special case for mutilator promotion: use the original role order
     let currentRoleIndex;
@@ -1968,11 +2089,32 @@ async function handleNightActionCompleted(code, role, target, io) {
       
       const nextRolePlayer = game.players.find(p => p.role === nextRole);
       
-      // Check if next role is a no-action role or dead player
-      let isNoActionRole = ["citizen", "mayor", "sacrifice"].includes(nextRole);
+      // Check if sacrifice has revenge available
       const isSacrificeRevenge = nextRolePlayer?.role === 'sacrifice' && 
                                 nextRolePlayer.canRevenge && 
                                 !nextRolePlayer.hasUsedRevenge;
+      
+      // Debug logging for sacrifice
+      if (nextRole === 'sacrifice') {
+        console.log('🗡️ SACRIFICE DEBUG:', {
+          playerFound: !!nextRolePlayer,
+          username: nextRolePlayer?.username,
+          role: nextRolePlayer?.role,
+          canRevenge: nextRolePlayer?.canRevenge,
+          hasUsedRevenge: nextRolePlayer?.hasUsedRevenge,
+          isSpectator: nextRolePlayer?.isSpectator,
+          alive: nextRolePlayer?.alive,
+          calculatedIsSacrificeRevenge: isSacrificeRevenge
+        });
+      }
+      
+      // Check if next role is a no-action role or dead player
+      let isNoActionRole = ["citizen", "mayor"].includes(nextRole);
+      
+      // Sacrifice is no-action role unless they have revenge
+      if (nextRole === 'sacrifice' && !isSacrificeRevenge) {
+        isNoActionRole = true; // Treat normal sacrifice as no-action
+      }
       
       // Special check: if next role is mutilator and killer is dead, treat as no-action
       const isKillerDead = !game.players.find(p => p.role === "killer" && p.alive);
@@ -1990,29 +2132,35 @@ async function handleNightActionCompleted(code, role, target, io) {
         isNoActionRole = true;
       }
       
+      // Check if next role player is marked to die next round (policeman with broken heart)
+      const isPolicemanDying = nextRolePlayer?.role === "policeman" && nextRolePlayer.dieNextRound;
+      
       console.log('🎭 Next role details:', {
         role: nextRole,
         player: nextRolePlayer?.username,
         isAlive: nextRolePlayer?.alive,
         isNoActionRole,
         isSacrificeRevenge,
-        isMutilatorWithDeadKiller
+        isMutilatorWithDeadKiller,
+        isPolicemanDying,
+        willAutoComplete: (isNoActionRole || isPolicemanDying || (nextRolePlayer && !nextRolePlayer.alive)) && !isSacrificeRevenge
       });
       
       // Always show role message for 5 seconds, regardless of player status
       io.in(code).emit('night-action-started', { 
         role: nextRole,
         isDead: !nextRolePlayer?.alive && !isSacrificeRevenge,
-        isNoActionRole: isNoActionRole,
+        isNoActionRole: isNoActionRole || isPolicemanDying, // Policeman dying acts like no-action role
         isSacrificeRevenge: isSacrificeRevenge,
+        isPolicemanDying: isPolicemanDying,
         narration: nextRolePlayer?.alive ? undefined : `${nextRolePlayer?.username} (${nextRole}) is no longer with us...`
       });
       
       console.log('📡 Emitted night-action-started for:', nextRole);
       
-      // If it's a no-action role or dead player (but not sacrifice revenge), wait 5 seconds then auto-proceed
-      if ((isNoActionRole || (nextRolePlayer && !nextRolePlayer.alive)) && !isSacrificeRevenge) {
-        console.log('🔄 Next role is no-action/dead, will auto-complete in 5 seconds');
+      // If it's a no-action role, dead player, or policeman dying (but not sacrifice revenge), wait 5 seconds then auto-proceed
+      if ((isNoActionRole || isPolicemanDying || (nextRolePlayer && !nextRolePlayer.alive)) && !isSacrificeRevenge) {
+        console.log('🔄 Next role is no-action/dead/dying, will auto-complete in 5 seconds');
         setTimeout(async () => {
           const updatedGame = await Game.findOne({ code });
           if (updatedGame && updatedGame.currentRole === nextRole) {

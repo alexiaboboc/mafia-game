@@ -61,12 +61,12 @@ router.post('/forgot-password', async (req, res) => {
       const mailOptions = {
         from: process.env.EMAIL_USER,
         to: email,
-        subject: 'Password Reset Request - Mafia Game',
+        subject: 'Mafia: The Game | Password Reset Request',
         html: `
           <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
             <h1 style="color: #b60056;">Password Reset Request</h1>
             <p>Hello ${user.username},</p>
-            <p>You requested a password reset for your Mafia Game account. Click the button below to reset your password:</p>
+            <p>You requested a password reset for your Mafia: The Game account. Click the button below to reset your password:</p>
             <div style="text-align: center; margin: 30px 0;">
               <a href="${resetUrl}" 
                  style="background-color: #b60056; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; display: inline-block;">

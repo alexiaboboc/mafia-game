@@ -146,12 +146,14 @@ export async function resolveNightActions(code) {
       a.resolved = true;
       a.result = `Killed ${target?.username} (Sacrifice's revenge)`;
       
-      // Mark the Sacrifice as having used their revenge
+      // Mark the Sacrifice as having used their revenge and becomes spectator
       const sacrifice = playersMap[a.actorId];
       if (sacrifice) {
         const gamePlayer = game.players.find(player => player.id === a.actorId);
         if (gamePlayer) {
           gamePlayer.hasUsedRevenge = true;
+          gamePlayer.isSpectator = true; // Becomes spectator after revenge
+          console.log('👻 Sacrifice used revenge and becomes spectator:', sacrifice.username);
         }
       }
     } else {
@@ -183,11 +185,15 @@ export async function resolveNightActions(code) {
           // Find the actual player in the game's players array
           const gamePlayer = game.players.find(player => player.id === a.actorId);
           if (gamePlayer) {
-            // Mark them for death next round
-            if (!gamePlayer.dieNextRound) {
-              gamePlayer.dieNextRound = true;
-              console.log('👮 Policeman shot innocent - will die next round:', policeman.username);
-            }
+            // Mark them for death next round (won't die this round)
+            gamePlayer.dieNextRound = true;
+            console.log('👮 IMPORTANT: Policeman shot innocent - marked to die NEXT round only (stays alive this round):', {
+              policemanUsername: policeman.username,
+              currentRound,
+              currentlyAlive: gamePlayer.alive,
+              dieNextRound: gamePlayer.dieNextRound,
+              targetRole: target?.role
+            });
           }
         }
       }
@@ -239,7 +245,10 @@ export async function resolveNightActions(code) {
   // 10. Mayor and 11. Citizen have no night actions
 
   // Apply deaths (but save those healed)
-  console.log('💀 Processing deaths:', { deaths: Array.from(deaths), heals: Array.from(heals) });
+  console.log('💀 Processing deaths:', { 
+    deaths: Array.from(deaths).map(id => ({ id, username: playersMap[id]?.username, role: playersMap[id]?.role })), 
+    heals: Array.from(heals).map(id => ({ id, username: playersMap[id]?.username, role: playersMap[id]?.role }))
+  });
   const actualDeaths = [];
   const playersWithWills = [];
   const playersWithoutWills = [];
@@ -251,11 +260,22 @@ export async function resolveNightActions(code) {
         // Find the actual player in the game's players array and update their status
         const gamePlayer = game.players.find(player => player.id === id);
         if (gamePlayer) {
-          console.log('☠️ Marking player as dead:', { 
+          console.log('☠️ Processing death for player:', { 
             username: p.username, 
             role: p.role,
-            wasAlive: gamePlayer.alive 
+            wasAlive: gamePlayer.alive,
+            dieNextRound: gamePlayer.dieNextRound,
+            currentRound,
+            note: gamePlayer.dieNextRound ? 'This player is marked to die NEXT round but should NOT die this round!' : 'Normal death processing'
           });
+          
+          // CRITICAL: Skip players marked to die next round ONLY if they're not dying from other causes
+          if (gamePlayer.dieNextRound) {
+            console.log('⚠️ Player marked to die next round but ALSO targeted for death this round - processing as normal death:', p.username);
+            // If they're in deaths due to other actions (SK, Killer, etc), they die normally this round
+            // The dieNextRound flag becomes irrelevant because they're already dying
+            gamePlayer.dieNextRound = false; // Clear the flag since they're dying now
+          }
           
           // Special handling for Sacrifice
           if (gamePlayer.role === 'sacrifice' && !gamePlayer.hasUsedRevenge) {
@@ -329,13 +349,13 @@ export async function resolveNightActions(code) {
   game.players.forEach(player => {
     if (player.dieNextRound) {
       console.log('💔 Policeman dying from broken heart:', player.username);
-      // Mark as dead but keep in survivors list until next round
+      // Mark as dead - they die without testament
       player.alive = false;
       player.dieNextRound = false; // Reset the flag
       actualDeaths.push(player.username);
-      // Always give testament to policeman who dies from broken heart
-      playersWithWills.push(player.username);
-      console.log('👮 Policeman can write testament before dying');
+      // Policeman who dies from broken heart gets NO testament
+      playersWithoutWills.push(player.username);
+      console.log('👮 Policeman dies without testament (broken heart)');
     }
   });
 
@@ -358,6 +378,13 @@ export async function resolveNightActions(code) {
   const aliveTown = survivors.filter(p => !['killer', 'mutilator', 'serial-killer'].includes(p.role)).length;
 
   await game.save();
+
+  console.log('🎯 FINAL NIGHT RESULT:', {
+    currentRound,
+    actualDeaths,
+    playersMarkedToDieNextRound: game.players.filter(p => p.dieNextRound).map(p => ({ username: p.username, role: p.role })),
+    allAlivePlayers: game.players.filter(p => p.alive).map(p => ({ username: p.username, role: p.role, dieNextRound: p.dieNextRound }))
+  });
 
   // Return results for client
   return {
