@@ -650,3 +650,58 @@
   from { opacity: 0; transform: translateY(20px); }
   to { opacity: 1; transform: translateY(0); }
 }
+
+/* Mayor Triple Vote Styles */
+.mayor-revealed {
+  border-color: #ffd43b !important;
+  background: rgba(255, 212, 59, 0.15) !important;
+  position: relative;
+}
+
+.mayor-badge {
+  display: block;
+  font-size: 0.7rem;
+  color: #ffd43b;
+  font-weight: 600;
+  margin-top: 0.2rem;
+}
+
+.triple-vote-section {
+  margin: 0.8rem 0;
+  padding: 0.8rem;
+  background: rgba(255, 212, 59, 0.1);
+  border: 1px solid rgba(255, 212, 59, 0.3);
+  border-radius: 8px;
+}
+
+.triple-vote-checkbox {
+  display: flex;
+  align-items: center;
+  font-size: 0.9rem;
+  color: #ffd43b;
+  cursor: pointer;
+  gap: 0.5rem;
+}
+
+.triple-vote-checkbox input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: #ffd43b;
+}
+
+.triple-vote-indicator {
+  color: #ffd43b;
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.submit-vote-button.triple-vote-active {
+  background: rgba(255, 212, 59, 0.2);
+  border-color: #ffd43b;
+  color: #ffd43b;
+}
+
+.submit-vote-button.triple-vote-active:hover {
+  background: rgba(255, 212, 59, 0.4);
+  transform: scale(1.05);
+}

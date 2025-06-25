@@ -22,6 +22,8 @@ interface Player {
   muted?: string;
   isSpectator?: boolean;
   willBecomeSpectator?: boolean;
+  hasUsedTripleVote?: boolean;
+  mayorRevealed?: boolean;
 }
 
 interface VoteResult {
@@ -53,6 +55,8 @@ export default function VotingFrame() {
   const [hasVoted, setHasVoted] = useState(false);
   const [voteResult, setVoteResult] = useState<VoteResult | null>(null);
   const [gameResult, setGameResult] = useState<GameResult | null>(null);
+  const [tripleVoteMode, setTripleVoteMode] = useState(false);
+  const [revealedMayors, setRevealedMayors] = useState<Set<string>>(new Set());
   
   // Testament state
   const [eliminatedPlayer, setEliminatedPlayer] = useState<string | null>(null);
@@ -71,6 +75,10 @@ export default function VotingFrame() {
   
   // Check if player is vote-muted
   const isVoteMuted = currentPlayer?.muted === 'vote';
+  
+  // Check if current player is mayor and can use triple vote
+  const isMayor = currentPlayer?.role === 'mayor';
+  const canUseTripleVote = isMayor && !currentPlayer?.hasUsedTripleVote;
 
   // Initialize game state
   useEffect(() => {
@@ -242,6 +250,24 @@ export default function VotingFrame() {
       );
     };
 
+    const handleMayorRevealed = (data: { mayorUsername: string, vote: string, isTripleVote: boolean }) => {
+      console.log('🏛️ Mayor revealed:', data);
+      setRevealedMayors(prev => new Set(prev).add(data.mayorUsername));
+      
+      // Update player state
+      setPlayers(prevPlayers => 
+        prevPlayers.map(player => 
+          player.username === data.mayorUsername
+            ? { 
+                ...player, 
+                mayorRevealed: true,
+                hasUsedTripleVote: true
+              }
+            : player
+        )
+      );
+    };
+
     console.log('🔌 Setting up socket listeners for voting');
 
     // Register socket event listeners
@@ -252,6 +278,7 @@ export default function VotingFrame() {
     socket.on('testament-received', handleTestamentReceived);
     socket.on('voting-state-sync', handleVotingStateSync);
     socket.on('player-status-updated', handlePlayerStatusUpdated);
+    socket.on('mayor-revealed', handleMayorRevealed);
 
     return () => {
       console.log('🔌 Cleaning up socket listeners for voting');
@@ -262,6 +289,7 @@ export default function VotingFrame() {
       socket.off('testament-received', handleTestamentReceived);
       socket.off('voting-state-sync', handleVotingStateSync);
       socket.off('player-status-updated', handlePlayerStatusUpdated);
+      socket.off('mayor-revealed', handleMayorRevealed);
     };
   }, [lobbyCode, navigate, username]);
 
@@ -312,14 +340,29 @@ export default function VotingFrame() {
   const handleSubmitVote = () => {
     if (hasVoted || !isAlive || isVoteMuted || isSacrificeSpectator) return;
     
-    console.log(`🗳️ Submitting vote: ${selectedPlayer || 'abstain'}`);
+    const vote = selectedPlayer || 'abstain';
+    console.log(`🗳️ Submitting vote: ${vote}${tripleVoteMode ? ' (TRIPLE)' : ''}`);
     setHasVoted(true);
     
-    socket.emit('cast-vote', { 
-      code: lobbyCode, 
-      vote: selectedPlayer || 'abstain',
-      username: username
-    });
+    if (tripleVoteMode && canUseTripleVote) {
+      socket.emit('cast-triple-vote', { 
+        code: lobbyCode, 
+        vote: vote,
+        username: username
+      });
+    } else {
+      socket.emit('cast-vote', { 
+        code: lobbyCode, 
+        vote: vote,
+        username: username
+      });
+    }
+  };
+
+  const toggleTripleVote = () => {
+    if (canUseTripleVote) {
+      setTripleVoteMode(!tripleVoteMode);
+    }
   };
 
   const handleTestamentSubmit = () => {
@@ -398,10 +441,11 @@ export default function VotingFrame() {
                 {votablePlayers.map((player, i) => (
                   <div
                     key={i}
-                    className={`vote-box ${selectedPlayer === player.username ? "selected" : ""}`}
+                    className={`vote-box ${selectedPlayer === player.username ? "selected" : ""} ${player.mayorRevealed ? "mayor-revealed" : ""}`}
                     onClick={() => handleVote(player.username)}
                   >
                     {player.username}
+                    {player.mayorRevealed && <span className="mayor-badge">🏛️ MAYOR</span>}
                   </div>
                 ))}
                 <div
@@ -416,12 +460,27 @@ export default function VotingFrame() {
                 <div className="vote-submit-section">
                   <p className="selected-vote">
                     Selected: <strong>{selectedPlayer === 'abstain' ? 'Abstain' : selectedPlayer}</strong>
+                    {tripleVoteMode && <span className="triple-vote-indicator"> (Triple Vote - 3x)</span>}
                   </p>
+                  
+                  {canUseTripleVote && (
+                    <div className="triple-vote-section">
+                      <label className="triple-vote-checkbox">
+                        <input 
+                          type="checkbox" 
+                          checked={tripleVoteMode}
+                          onChange={toggleTripleVote}
+                        />
+                        Use Triple Vote (One time only - reveals you as Mayor)
+                      </label>
+                    </div>
+                  )}
+                  
                   <button 
-                    className="submit-vote-button"
+                    className={`submit-vote-button ${tripleVoteMode ? 'triple-vote-active' : ''}`}
                     onClick={handleSubmitVote}
                   >
-                    Submit Vote
+                    {tripleVoteMode ? 'Submit Triple Vote' : 'Submit Vote'}
                   </button>
                 </div>
               )}
